@@ -1,0 +1,14 @@
+# Core FastAPI dependencies
+fastapi==0.124.4
+uvicorn==0.38.0
+starlette==0.50.0
+pydantic==2.12.5
+
+# Supabase client
+supabase==2.25.1
+
+# Environment variables
+python-dotenv==1.2.1
+
+# HTTP client (for testing)
+httpx==0.28.1
