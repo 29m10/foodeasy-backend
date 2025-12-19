@@ -21,9 +21,10 @@ async def get_all_onboarding_data() -> Dict[str, Any]:
     Returns:
         Dict containing success status and all onboarding data:
         - goals
-        - medical_deficiencies
         - dietary_patterns
         - dietary_restrictions
+        - medical_restrictions
+        - nutrition_preferences
         - spice_levels
         - cooking_oils
         - cuisines
@@ -51,11 +52,6 @@ async def get_all_onboarding_data() -> Dict[str, Any]:
             fetch_table_data, 
             "onboarding_goals"
         )
-        medical_deficiencies_task = loop.run_in_executor(
-            executor,
-            fetch_table_data,
-            "onboarding_medical_deficiencies"
-        )
         dietary_patterns_task = loop.run_in_executor(
             executor,
             fetch_table_data,
@@ -65,6 +61,16 @@ async def get_all_onboarding_data() -> Dict[str, Any]:
             executor,
             fetch_table_data,
             "onboarding_dietary_restrictions"
+        )
+        medical_restrictions_task = loop.run_in_executor(
+            executor,
+            fetch_table_data,
+            "onboarding_medical_restrictions"
+        )
+        nutrition_preferences_task = loop.run_in_executor(
+            executor,
+            fetch_table_data,
+            "onboarding_nutrition_preferences"
         )
         spice_levels_task = loop.run_in_executor(
             executor,
@@ -83,12 +89,13 @@ async def get_all_onboarding_data() -> Dict[str, Any]:
         )
         
         # Wait for all tasks to complete
-        goals, medical_deficiencies, dietary_patterns, dietary_restrictions, \
-        spice_levels, cooking_oils, cuisines = await asyncio.gather(
+        goals, dietary_patterns, dietary_restrictions, medical_restrictions, \
+        nutrition_preferences, spice_levels, cooking_oils, cuisines = await asyncio.gather(
             goals_task,
-            medical_deficiencies_task,
             dietary_patterns_task,
             dietary_restrictions_task,
+            medical_restrictions_task,
+            nutrition_preferences_task,
             spice_levels_task,
             cooking_oils_task,
             cuisines_task
@@ -98,9 +105,10 @@ async def get_all_onboarding_data() -> Dict[str, Any]:
             "success": True,
             "data": {
                 "goals": goals,
-                "medical_deficiencies": medical_deficiencies,
                 "dietary_patterns": dietary_patterns,
                 "dietary_restrictions": dietary_restrictions,
+                "medical_restrictions": medical_restrictions,
+                "nutrition_preferences": nutrition_preferences,
                 "spice_levels": spice_levels,
                 "cooking_oils": cooking_oils,
                 "cuisines": cuisines
@@ -150,38 +158,6 @@ async def get_goals() -> Dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch goals: {str(e)}"
-        )
-
-
-@router.get("/medical-deficiencies", status_code=status.HTTP_200_OK)
-async def get_medical_deficiencies() -> Dict[str, Any]:
-    """
-    Get all available medical deficiencies for onboarding.
-    
-    Returns:
-        Dict containing success status and list of active medical deficiencies ordered by display_order
-    """
-    supabase = get_supabase_admin()
-    
-    try:
-        response = supabase.table("onboarding_medical_deficiencies") \
-            .select("*") \
-            .eq("is_active", True) \
-            .order("display_order") \
-            .execute()
-        
-        return {
-            "success": True,
-            "data": response.data
-        }
-    except HTTPException:
-        # Re-raise HTTP exceptions as-is
-        raise
-    except Exception as e:
-        # Log the error in production (you might want to add logging here)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch medical deficiencies: {str(e)}"
         )
 
 
@@ -246,6 +222,70 @@ async def get_dietary_restrictions() -> Dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch dietary restrictions: {str(e)}"
+        )
+
+
+@router.get("/medical-restrictions", status_code=status.HTTP_200_OK)
+async def get_medical_restrictions() -> Dict[str, Any]:
+    """
+    Get all available medical restrictions for onboarding.
+    
+    Returns:
+        Dict containing success status and list of active medical restrictions ordered by display_order
+    """
+    supabase = get_supabase_admin()
+    
+    try:
+        response = supabase.table("onboarding_medical_restrictions") \
+            .select("*") \
+            .eq("is_active", True) \
+            .order("display_order") \
+            .execute()
+        
+        return {
+            "success": True,
+            "data": response.data
+        }
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        # Log the error in production (you might want to add logging here)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch medical restrictions: {str(e)}"
+        )
+
+
+@router.get("/nutrition-preferences", status_code=status.HTTP_200_OK)
+async def get_nutrition_preferences() -> Dict[str, Any]:
+    """
+    Get all available nutrition preferences for onboarding.
+    
+    Returns:
+        Dict containing success status and list of active nutrition preferences ordered by display_order
+    """
+    supabase = get_supabase_admin()
+    
+    try:
+        response = supabase.table("onboarding_nutrition_preferences") \
+            .select("*") \
+            .eq("is_active", True) \
+            .order("display_order") \
+            .execute()
+        
+        return {
+            "success": True,
+            "data": response.data
+        }
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        # Log the error in production (you might want to add logging here)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch nutrition preferences: {str(e)}"
         )
 
 
