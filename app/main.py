@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import onboarding, auth, cook
+from app.routes import onboarding, auth, cook, user
 import os
 from dotenv import load_dotenv
 
@@ -34,6 +34,7 @@ app.add_middleware(
 # Include routers
 app.include_router(onboarding.router)
 app.include_router(auth.router)
+app.include_router(user.router)
 app.include_router(cook.router)
 
 # Root endpoint
@@ -46,7 +47,8 @@ async def root():
         "health": "/health",
         "endpoints": {
             "onboarding": "/onboarding",
-            "auth": "/auth"
+            "auth": "/auth",
+            "user": "/user"
         }
     }
 
