@@ -209,3 +209,9 @@ __marimo__/
 
 # Test files (local testing only)
 test.py
+
+# Firebase credentials (sensitive)
+firebase-credentials.json
+*.json
+!package.json
+!package-lock.json
