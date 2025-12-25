@@ -3,7 +3,7 @@
 from app.services.supabase_client import get_supabase_admin
 from app.services.firebase_service import verify_firebase_token
 from firebase_admin import auth as firebase_auth
-from typing import Dict, Any
+from typing import Dict, Any, List
 from datetime import datetime
 
 
@@ -19,22 +19,6 @@ class AuthService:
     async def verify_and_sync_user(self, id_token: str) -> Dict[str, Any]:
         """
         Verify Firebase ID token and sync user with Supabase.
-        
-        Flow:
-        1. Verify Firebase token
-        2. Extract firebase_uid and phone_number
-        3. Check if user exists by firebase_uid
-        4. If exists: update last_login, return user_id
-        5. If new: create user with phone only, return user_id
-        
-        Args:
-            id_token: Firebase ID token from React Native
-            
-        Returns:
-            dict: Contains user_id, phone_number, is_new_user
-            
-        Raises:
-            ValueError: If phone number is missing from token
         """
         # Verify Firebase token
         decoded_token = verify_firebase_token(id_token)
@@ -93,16 +77,6 @@ class AuthService:
     async def update_user_profile(self, user_id: str, update_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Update user profile (name, metadata, etc.)
-        
-        Args:
-            user_id: UUID of the user
-            update_data: Dictionary of fields to update
-            
-        Returns:
-            dict: Updated user profile
-            
-        Raises:
-            ValueError: If no valid fields to update or user not found
         """
         # Protected fields that cannot be updated
         protected_fields = ['id', 'firebase_uid', 'phone_number', 'created_at']
@@ -123,18 +97,78 @@ class AuthService:
         
         return result.data[0]
     
-    async def get_user_by_id(self, user_id: str) -> Dict[str, Any]:
+    async def update_onboarding_data(self, user_id: str, onboarding_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Get user profile by user_id
+        Update user's complete onboarding data.
+        
+        Stores:
+        - Basic info (age, gender, household) in direct columns
+        - All preferences as text/arrays in metadata JSON column
         
         Args:
             user_id: UUID of the user
+            onboarding_data: Dictionary containing all onboarding data (with text values, not IDs)
             
         Returns:
-            dict: User profile data
+            dict: Updated user profile
+        """
+        try:
+            # Get current user data
+            user = await self.get_user_by_id(user_id)
+            current_metadata = user.get('metadata', {})
             
-        Raises:
-            ValueError: If user not found
+            # Separate direct columns from metadata
+            direct_columns = {
+                'age': onboarding_data.get('age'),
+                'gender': onboarding_data.get('gender'),
+                'total_household_adults': onboarding_data.get('total_household_adults', 1),
+                'total_household_children': onboarding_data.get('total_household_children', 0),
+                'onboarding_completed': True,
+                'onboarding_completed_at': datetime.utcnow().isoformat()
+            }
+            
+            # Everything else goes to metadata (as text, not IDs)
+            metadata_fields = {
+                'goals': onboarding_data.get('goals', []),
+                'medical_restrictions': onboarding_data.get('medical_restrictions', []),
+                'dietary_pattern': onboarding_data.get('dietary_pattern'),
+                'nutrition_preferences': onboarding_data.get('nutrition_preferences', []),
+                'dietary_restrictions': onboarding_data.get('dietary_restrictions', []),
+                'spice_level': onboarding_data.get('spice_level'),
+                'cooking_oil_preferences': onboarding_data.get('cooking_oil_preferences', []),
+                'cuisines_preferences': onboarding_data.get('cuisines_preferences', []),
+                'breakfast_preferences': onboarding_data.get('breakfast_preferences', []),
+                'lunch_preferences': onboarding_data.get('lunch_preferences', []),
+                'snacks_preferences': onboarding_data.get('snacks_preferences', []),
+                'dinner_preferences': onboarding_data.get('dinner_preferences', []),
+                'extra_input': onboarding_data.get('extra_input', '')
+            }
+            
+            # Merge with existing metadata
+            current_metadata.update(metadata_fields)
+            
+            # Add metadata to direct columns update
+            direct_columns['metadata'] = current_metadata
+            
+            # Update database
+            result = self.supabase.table('user_profiles') \
+                .update(direct_columns) \
+                .eq('id', user_id) \
+                .execute()
+            
+            if not result.data or len(result.data) == 0:
+                raise ValueError(f"User not found with user_id: {user_id}")
+            
+            print(f"Onboarding data updated for user: {user_id}")
+            return result.data[0]
+            
+        except Exception as e:
+            print(f"Error updating onboarding data: {str(e)}")
+            raise
+    
+    async def get_user_by_id(self, user_id: str) -> Dict[str, Any]:
+        """
+        Get user profile by user_id
         """
         result = self.supabase.table('user_profiles') \
             .select('*') \
@@ -145,6 +179,23 @@ class AuthService:
             raise ValueError(f"User not found with user_id: {user_id}")
         
         return result.data[0]
+    
+    async def get_onboarding_status(self, user_id: str) -> Dict[str, Any]:
+        """
+        Check if user has completed onboarding
+        """
+        try:
+            user = await self.get_user_by_id(user_id)
+            
+            return {
+                'user_id': user_id,
+                'onboarding_completed': user.get('onboarding_completed', False),
+                'onboarding_completed_at': user.get('onboarding_completed_at'),
+                'has_name': user.get('full_name') is not None
+            }
+        except Exception as e:
+            print(f"Error getting onboarding status: {str(e)}")
+            raise
 
 
 # Create singleton instance
