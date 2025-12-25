@@ -28,6 +28,7 @@ async def get_all_onboarding_data() -> Dict[str, Any]:
         - spice_levels
         - cooking_oils
         - cuisines
+        - meal_items
     """
     supabase = get_supabase_admin()
     
@@ -42,6 +43,51 @@ async def get_all_onboarding_data() -> Dict[str, Any]:
             return response.data
         except Exception as e:
             raise Exception(f"Failed to fetch {table_name}: {str(e)}")
+    
+    def fetch_meal_items():
+        """Helper function to fetch meal items with meal types"""
+        try:
+            response = supabase.table("onboarding_meal_items_meal_types") \
+                .select("""
+                    onboarding_meal_item_id,
+                    is_vegetarian,
+                    is_eggetarian,
+                    is_carnitarian,
+                    is_omnivore,
+                    is_vegan,
+                    onboarding_meal_items!inner(id, name, image_url, is_active),
+                    meal_types!inner(id, name)
+                """) \
+                .execute()
+            
+            # Transform the response to match the requested format
+            # Filter for only active meal items
+            formatted_data = []
+            for item in response.data:
+                meal_item = item.get("onboarding_meal_items", {})
+                meal_type = item.get("meal_types", {})
+                
+                # Only include active meal items
+                if meal_item.get("is_active") is not True:
+                    continue
+                
+                formatted_item = {
+                    "onboarding_meal_item_name": meal_item.get("name"),
+                    "onboarding_meal_item_id": meal_item.get("id"),
+                    "onboarding_meal_item_image_url": meal_item.get("image_url"),
+                    "meal_type_name": meal_type.get("name"),
+                    "meal_type_id": meal_type.get("id"),
+                    "is_vegetarian": item.get("is_vegetarian"),
+                    "is_eggetarian": item.get("is_eggetarian"),
+                    "is_carnitarian": item.get("is_carnitarian"),
+                    "is_omnivore": item.get("is_omnivore"),
+                    "is_vegan": item.get("is_vegan")
+                }
+                formatted_data.append(formatted_item)
+            
+            return formatted_data
+        except Exception as e:
+            raise Exception(f"Failed to fetch meal items: {str(e)}")
     
     try:
         # Fetch all tables in parallel using thread pool executor
@@ -87,10 +133,14 @@ async def get_all_onboarding_data() -> Dict[str, Any]:
             fetch_table_data,
             "onboarding_cuisines"
         )
+        meal_items_task = loop.run_in_executor(
+            executor,
+            fetch_meal_items
+        )
         
         # Wait for all tasks to complete
         goals, dietary_patterns, dietary_restrictions, medical_restrictions, \
-        nutrition_preferences, spice_levels, cooking_oils, cuisines = await asyncio.gather(
+        nutrition_preferences, spice_levels, cooking_oils, cuisines, meal_items = await asyncio.gather(
             goals_task,
             dietary_patterns_task,
             dietary_restrictions_task,
@@ -98,7 +148,8 @@ async def get_all_onboarding_data() -> Dict[str, Any]:
             nutrition_preferences_task,
             spice_levels_task,
             cooking_oils_task,
-            cuisines_task
+            cuisines_task,
+            meal_items_task
         )
         
         return {
@@ -111,7 +162,8 @@ async def get_all_onboarding_data() -> Dict[str, Any]:
                 "nutrition_preferences": nutrition_preferences,
                 "spice_levels": spice_levels,
                 "cooking_oils": cooking_oils,
-                "cuisines": cuisines
+                "cuisines": cuisines,
+                "meal_items": meal_items
             }
         }
     except HTTPException:
@@ -382,6 +434,80 @@ async def get_cuisines() -> Dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch cuisines: {str(e)}"
+        )
+
+
+@router.get("/meal-items", status_code=status.HTTP_200_OK)
+async def get_meal_items() -> Dict[str, Any]:
+    """
+    Get all meal items with their meal types and dietary preferences.
+    
+    Returns:
+        Dict containing success status and list of meal items with:
+        - onboarding_meal_item_name
+        - onboarding_meal_item_id
+        - onboarding_meal_item_image_url
+        - meal_type_name
+        - meal_type_id
+        - is_vegetarian
+        - is_eggetarian
+        - is_carnitarian
+        - is_omnivore
+        - is_vegan
+        
+    Only returns active onboarding_meal_items (is_active = true).
+    """
+    supabase = get_supabase_admin()
+    
+    try:
+        # Query the join table with related data
+        # Using inner join to ensure we only get records with valid relationships
+        response = supabase.table("onboarding_meal_items_meal_types") \
+            .select("""
+                onboarding_meal_item_id,
+                is_vegetarian,
+                is_eggetarian,
+                is_carnitarian,
+                is_omnivore,
+                is_vegan,
+                onboarding_meal_items!inner(id, name, image_url, is_active),
+                meal_types!inner(id, name)
+            """) \
+            .eq("onboarding_meal_items.is_active", True) \
+            .execute()
+        
+        # Transform the response to match the requested format
+        formatted_data = []
+        for item in response.data:
+            meal_item = item.get("onboarding_meal_items", {})
+            meal_type = item.get("meal_types", {})
+            
+            formatted_item = {
+                "onboarding_meal_item_name": meal_item.get("name"),
+                "onboarding_meal_item_id": meal_item.get("id"),
+                "onboarding_meal_item_image_url": meal_item.get("image_url"),
+                "meal_type_name": meal_type.get("name"),
+                "meal_type_id": meal_type.get("id"),
+                "is_vegetarian": item.get("is_vegetarian"),
+                "is_eggetarian": item.get("is_eggetarian"),
+                "is_carnitarian": item.get("is_carnitarian"),
+                "is_omnivore": item.get("is_omnivore"),
+                "is_vegan": item.get("is_vegan")
+            }
+            formatted_data.append(formatted_item)
+        
+        return {
+            "success": True,
+            "data": formatted_data
+        }
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        # Log the error in production (you might want to add logging here)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch meal items: {str(e)}"
         )
 
 
