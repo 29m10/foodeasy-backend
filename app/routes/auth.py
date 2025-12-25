@@ -36,11 +36,81 @@ class RefreshTokenRequest(BaseModel):
     id_token: str = Field(..., description="Current Firebase ID token (even if expired)")
 
 
+class ResendOTPRequest(BaseModel):
+    """Request to resend OTP"""
+    phone_number: str = Field(..., description="Phone number in E.164 format (e.g., +919876543210)")
+
+
 
 
 # ============================================
 # AUTH ENDPOINTS
 # ============================================
+
+@router.post(
+    "/resend-otp",
+    status_code=status.HTTP_200_OK,
+    summary="Request OTP resend",
+    description="""
+    Request to resend OTP for phone number verification.
+    
+    **Note:** This endpoint validates the phone number and tracks resend attempts.
+    The actual OTP sending is handled by Firebase on the client side.
+    
+    **Flow:**
+    1. Client calls this endpoint with phone number
+    2. Backend validates phone number format
+    3. Backend returns success response
+    4. Client calls Firebase `signInWithPhoneNumber()` again to resend OTP
+    5. Firebase sends new OTP SMS
+    
+    **Rate Limiting:** 
+    - Consider implementing rate limiting to prevent abuse
+    - Track resend attempts per phone number
+    - Recommended: Max 3-5 resends per 15 minutes
+    
+    **Phone Number Format:**
+    - Must be in E.164 format: +[country code][number]
+    - Example: +919876543210 (India)
+    """
+)
+async def resend_otp(request: ResendOTPRequest) -> Dict[str, Any]:
+    """
+    Request OTP resend for a phone number.
+    
+    Note: Actual OTP sending happens client-side via Firebase.
+    This endpoint validates the request and can track resend attempts.
+    """
+    import re
+    
+    # Validate phone number format (E.164 format: +[country code][number])
+    phone_pattern = r'^\+[1-9]\d{1,14}$'
+    if not re.match(phone_pattern, request.phone_number):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid phone number format. Please use E.164 format (e.g., +919876543210)"
+        )
+    
+    try:
+        # TODO: Implement rate limiting here
+        # - Track resend attempts per phone number
+        # - Limit to 3-5 resends per 15 minutes
+        # - Store in Redis or database
+        
+        # For now, just validate and return success
+        return {
+            "success": True,
+            "message": "Phone number validated. Please call Firebase signInWithPhoneNumber() on client to resend OTP.",
+            "phone_number": request.phone_number,
+            "note": "Actual OTP sending is handled by Firebase SDK on the client side."
+        }
+    except Exception as e:
+        print(f"Error in resend_otp: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process resend OTP request"
+        )
+
 
 @router.post(
     "/verify-otp",
