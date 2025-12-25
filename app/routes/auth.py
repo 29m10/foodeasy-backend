@@ -26,12 +26,46 @@ class VerifyTokenResponse(BaseModel):
 
 
 class UpdateProfileRequest(BaseModel):
-    """Request to update user profile"""
+    """Request to update user profile - basic fields only"""
     full_name: str = Field(..., min_length=1, max_length=100, description="User's full name")
+
+
+class UpdateUserProfileRequest(BaseModel):
+    """Request to update user profile with metadata support"""
+    # Basic profile fields
+    full_name: Optional[str] = Field(None, min_length=1, max_length=100, description="User's full name")
+    age: Optional[int] = Field(None, ge=1, le=120, description="User age")
+    gender: Optional[str] = Field(None, description="Gender: male, female, other, prefer_not_to_say")
+    total_household_adults: Optional[int] = Field(None, ge=1, description="Number of adults in household")
+    total_household_children: Optional[int] = Field(None, ge=0, description="Number of children in household")
+    
+    # Metadata fields (will be merged with existing metadata)
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Custom metadata to merge with existing metadata")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "full_name": "John Doe",
+                "age": 28,
+                "gender": "male",
+                "total_household_adults": 2,
+                "total_household_children": 1,
+                "metadata": {
+                    "preferences": {
+                        "theme": "dark",
+                        "notifications": True
+                    },
+                    "custom_field": "custom_value"
+                }
+            }
+        }
 
 
 class UpdateOnboardingRequest(BaseModel):
     """Request to update complete onboarding data - all values are TEXT, not IDs"""
+    
+    # Basic profile info
+    full_name: Optional[str] = Field(None, min_length=1, max_length=100, description="User's full name")
     
     # Basic demographics
     age: Optional[int] = Field(None, ge=1, le=120, description="User age")
@@ -59,6 +93,7 @@ class UpdateOnboardingRequest(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
+                "full_name": "John Doe",
                 "age": 28,
                 "gender": "male",
                 "total_household_adults": 2,
@@ -136,33 +171,93 @@ async def verify_otp(request: VerifyTokenRequest) -> VerifyTokenResponse:
 @router.put(
     "/user/{user_id}/profile",
     status_code=status.HTTP_200_OK,
-    summary="Update user profile (add name)",
+    summary="Update user profile with metadata",
     description="""
-    Update user profile with basic information like full name.
+    Update user profile including basic fields and metadata.
     
-    This endpoint allows updating user profile fields after initial registration.
-    Currently supports updating the user's full name.
+    This endpoint allows updating:
+    - Direct columns: full_name (stored in user_profiles table)
+    - Metadata fields: age, gender, total_household_adults, total_household_children (stored in metadata JSONB)
+    - Custom metadata: Additional JSON object that will be merged with existing metadata
+    
+    **Storage:**
+    - `full_name` is stored as a direct column in the user_profiles table
+    - `age`, `gender`, `total_household_adults`, `total_household_children` are stored in the metadata JSONB column
+    - Custom metadata fields are also stored in the metadata JSONB column
+    
+    **Metadata handling:**
+    - All metadata (including age, gender, household) is merged with existing metadata (not replaced)
+    - Existing metadata keys will be updated, new keys will be added
+    - To remove a metadata key, set it to null in the update
     
     **Protected fields:** Cannot update id, firebase_uid, phone_number, or created_at.
+    
+    **Example:**
+    ```json
+    {
+        "full_name": "John Doe",
+        "age": 28,
+        "gender": "male",
+        "total_household_adults": 2,
+        "metadata": {
+            "preferences": {"theme": "dark"},
+            "custom_field": "value"
+        }
+    }
+    ```
     """
 )
-async def update_profile(user_id: str, request: UpdateProfileRequest) -> Dict[str, Any]:
-    """Update user profile with name."""
+async def update_user_profile(user_id: str, request: UpdateUserProfileRequest) -> Dict[str, Any]:
+    """Update user profile with metadata support"""
     try:
-        update_data = {"full_name": request.full_name}
+        # Prepare update data
+        update_data = request.dict(exclude_none=True)
+        
+        # Fields that should be stored in metadata (not direct columns)
+        metadata_fields = ['age', 'gender', 'total_household_adults', 'total_household_children']
+        
+        # Get current user to merge metadata
+        current_user = await auth_service.get_user_by_id(user_id)
+        current_metadata = current_user.get('metadata', {})
+        if not isinstance(current_metadata, dict):
+            current_metadata = {}
+        
+        # Move metadata-only fields from update_data to metadata
+        metadata_to_update = {}
+        for field in metadata_fields:
+            if field in update_data:
+                metadata_to_update[field] = update_data.pop(field)
+        
+        # Handle explicit metadata field if provided
+        explicit_metadata = update_data.pop('metadata', None)
+        if explicit_metadata is not None:
+            if isinstance(explicit_metadata, dict):
+                metadata_to_update.update(explicit_metadata)
+            else:
+                metadata_to_update = explicit_metadata
+        
+        # Merge all metadata updates with existing metadata
+        if metadata_to_update:
+            current_metadata.update(metadata_to_update)
+            update_data['metadata'] = current_metadata
+        
+        if not update_data:
+            raise ValueError("No fields provided to update")
+        
         updated_user = await auth_service.update_user_profile(user_id, update_data)
         
         return {
             "success": True,
+            "message": "User profile updated successfully",
             "data": updated_user
         }
     except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
-        print(f"Error in update_profile: {str(e)}")
+        print(f"Error in update_user_profile: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update profile: {str(e)}"
@@ -174,9 +269,13 @@ async def update_profile(user_id: str, request: UpdateProfileRequest) -> Dict[st
     status_code=status.HTTP_200_OK,
     summary="Save complete onboarding data",
     description="""
-    Save all user onboarding selections.
+    Save all user onboarding selections including full name.
     
     **IMPORTANT:** Send actual TEXT values (names), NOT IDs.
+    
+    **Accepts:**
+    - full_name: User's full name (stored as direct column)
+    - All other onboarding data (stored in metadata JSONB)
     
     Example:
     - ✅ "goals": ["Weight Loss", "Muscle Gain"]
@@ -210,20 +309,24 @@ async def update_onboarding_data(user_id: str, request: UpdateOnboardingRequest)
 @router.get(
     "/user/{user_id}",
     status_code=status.HTTP_200_OK,
-    summary="Get user profile with all data",
+    summary="Get user profile with metadata",
     description="""
-    Retrieve complete user profile including all onboarding data and preferences.
+    Retrieve complete user profile including all data and metadata.
     
-    Returns:
-    - Basic info: user_id, phone_number, full_name, age, gender
-    - Household info: total_household_adults, total_household_children
-    - Onboarding status: onboarding_completed, onboarding_completed_at
-    - All preferences stored in metadata JSON (goals, dietary patterns, restrictions, etc.)
-    - Timestamps: created_at, last_login
+    **Returns complete user profile with:**
+    - Direct columns: user_id, phone_number, full_name, created_at, last_login
+    - Metadata JSONB: Contains all other user data:
+      - Demographics: age, gender, total_household_adults, total_household_children
+      - Onboarding status: onboarding_completed, onboarding_completed_at
+      - Onboarding preferences: goals, dietary_pattern, medical_restrictions, nutrition_preferences, etc.
+      - Custom metadata: Any additional key-value pairs stored
+    
+    **Note:** Age, gender, household info, onboarding status, and preferences are all stored
+    in the metadata JSONB column, not as separate table columns.
     """
 )
-async def get_user(user_id: str) -> Dict[str, Any]:
-    """Get complete user profile"""
+async def get_user_profile(user_id: str) -> Dict[str, Any]:
+    """Get complete user profile including metadata"""
     try:
         user = await auth_service.get_user_by_id(user_id)
         return {
@@ -236,10 +339,10 @@ async def get_user(user_id: str) -> Dict[str, Any]:
             detail=str(e)
         )
     except Exception as e:
-        print(f"Error in get_user: {str(e)}")
+        print(f"Error in get_user_profile: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch user: {str(e)}"
+            detail=f"Failed to fetch user profile: {str(e)}"
         )
 
 
