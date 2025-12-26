@@ -56,6 +56,10 @@ async def get_all_onboarding_data() -> Dict[str, Any]:
     """
     supabase = get_supabase_admin()
     
+    def remove_created_at(items):
+        """Helper function to remove created_at from a list of items"""
+        return [{k: v for k, v in item.items() if k != "created_at"} for item in items]
+    
     def fetch_table_data(table_name: str):
         """Helper function to fetch data from a table"""
         try:
@@ -64,52 +68,21 @@ async def get_all_onboarding_data() -> Dict[str, Any]:
                 .eq("is_active", True) \
                 .order("display_order") \
                 .execute()
-            return response.data
+            return remove_created_at(response.data)
         except Exception as e:
             raise Exception(f"Failed to fetch {table_name}: {str(e)}")
     
     def fetch_meal_items():
-        """Helper function to fetch meal items with meal types"""
+        """Helper function to fetch meal items"""
         try:
-            response = supabase.table("onboarding_meal_items_meal_types") \
-                .select("""
-                    onboarding_meal_item_id,
-                    can_vegetarian_eat,
-                    can_eggetarian_eat,
-                    can_carnitarian_eat,
-                    can_omnitarian_eat,
-                    can_vegan_eat,
-                    onboarding_meal_items!inner(id, name, image_url, is_active),
-                    meal_types!inner(id, name)
-                """) \
+            response = supabase.table("onboarding_meal_items") \
+                .select("*") \
+                .eq("is_active", True) \
+                .order("id") \
                 .execute()
             
-            # Transform the response to match the requested format
-            # Filter for only active meal items
-            formatted_data = []
-            for item in response.data:
-                meal_item = item.get("onboarding_meal_items", {})
-                meal_type = item.get("meal_types", {})
-                
-                # Only include active meal items
-                if meal_item.get("is_active") is not True:
-                    continue
-                
-                formatted_item = {
-                    "onboarding_meal_item_name": meal_item.get("name"),
-                    "onboarding_meal_item_id": meal_item.get("id"),
-                    "onboarding_meal_item_image_url": meal_item.get("image_url"),
-                    "meal_type_name": meal_type.get("name"),
-                    "meal_type_id": meal_type.get("id"),
-                    "can_vegetarian_eat": item.get("can_vegetarian_eat"),
-                    "can_eggetarian_eat": item.get("can_eggetarian_eat"),
-                    "can_carnitarian_eat": item.get("can_carnitarian_eat"),
-                    "can_omnitarian_eat": item.get("can_omnitarian_eat"),
-                    "can_vegan_eat": item.get("can_vegan_eat")
-                }
-                formatted_data.append(formatted_item)
-            
-            return formatted_data
+            # Remove created_at from each item
+            return remove_created_at(response.data)
         except Exception as e:
             raise Exception(f"Failed to fetch meal items: {str(e)}")
     
@@ -234,9 +207,12 @@ async def get_goals() -> Dict[str, Any]:
             .order("display_order") \
             .execute()
         
+        # Remove created_at from each item
+        data = [{k: v for k, v in item.items() if k != "created_at"} for item in response.data]
+        
         return {
             "success": True,
-            "data": response.data
+            "data": data
         }
     except HTTPException:
         # Re-raise HTTP exceptions as-is
@@ -278,9 +254,12 @@ async def get_dietary_patterns() -> Dict[str, Any]:
             .order("display_order") \
             .execute()
         
+        # Remove created_at from each item
+        data = [{k: v for k, v in item.items() if k != "created_at"} for item in response.data]
+        
         return {
             "success": True,
-            "data": response.data
+            "data": data
         }
     except HTTPException:
         # Re-raise HTTP exceptions as-is
@@ -322,9 +301,12 @@ async def get_dietary_restrictions() -> Dict[str, Any]:
             .order("display_order") \
             .execute()
         
+        # Remove created_at from each item
+        data = [{k: v for k, v in item.items() if k != "created_at"} for item in response.data]
+        
         return {
             "success": True,
-            "data": response.data
+            "data": data
         }
     except HTTPException:
         # Re-raise HTTP exceptions as-is
@@ -366,9 +348,12 @@ async def get_medical_restrictions() -> Dict[str, Any]:
             .order("display_order") \
             .execute()
         
+        # Remove created_at from each item
+        data = [{k: v for k, v in item.items() if k != "created_at"} for item in response.data]
+        
         return {
             "success": True,
-            "data": response.data
+            "data": data
         }
     except HTTPException:
         # Re-raise HTTP exceptions as-is
@@ -410,9 +395,12 @@ async def get_nutrition_preferences() -> Dict[str, Any]:
             .order("display_order") \
             .execute()
         
+        # Remove created_at from each item
+        data = [{k: v for k, v in item.items() if k != "created_at"} for item in response.data]
+        
         return {
             "success": True,
-            "data": response.data
+            "data": data
         }
     except HTTPException:
         # Re-raise HTTP exceptions as-is
@@ -454,9 +442,12 @@ async def get_spice_levels() -> Dict[str, Any]:
             .order("display_order") \
             .execute()
         
+        # Remove created_at from each item
+        data = [{k: v for k, v in item.items() if k != "created_at"} for item in response.data]
+        
         return {
             "success": True,
-            "data": response.data
+            "data": data
         }
     except HTTPException:
         # Re-raise HTTP exceptions as-is
@@ -498,9 +489,12 @@ async def get_cooking_oils() -> Dict[str, Any]:
             .order("display_order") \
             .execute()
         
+        # Remove created_at from each item
+        data = [{k: v for k, v in item.items() if k != "created_at"} for item in response.data]
+        
         return {
             "success": True,
-            "data": response.data
+            "data": data
         }
     except HTTPException:
         # Re-raise HTTP exceptions as-is
@@ -542,9 +536,12 @@ async def get_cuisines() -> Dict[str, Any]:
             .order("display_order") \
             .execute()
         
+        # Remove created_at from each item
+        data = [{k: v for k, v in item.items() if k != "created_at"} for item in response.data]
+        
         return {
             "success": True,
-            "data": response.data
+            "data": data
         }
     except HTTPException:
         # Re-raise HTTP exceptions as-is
@@ -560,88 +557,37 @@ async def get_cuisines() -> Dict[str, Any]:
 @router.get(
     "/meal-items",
     status_code=status.HTTP_200_OK,
-    summary="Get all meal items with meal types",
+    summary="Get all meal items",
     description="""
-    Get all meal items with their meal types and dietary preferences.
+    Get all meal items from the onboarding_meal_items table.
     
-    Returns a list of meal items (breakfast, lunch, snacks, dinner) with:
-    - onboarding_meal_item_name: Name of the meal item (e.g., "Idli", "Dal Rice")
-    - onboarding_meal_item_id: Unique ID of the meal item
-    - onboarding_meal_item_image_url: Image URL for the meal item
-    - meal_type_name: Type of meal (e.g., "Breakfast", "Lunch", "Snacks", "Dinner")
-    - meal_type_id: Unique ID of the meal type
-    - can_vegetarian_eat: Boolean flag for vegetarian compatibility
-    - can_eggetarian_eat: Boolean flag for eggetarian compatibility
-    - can_carnitarian_eat: Boolean flag for carnitarian compatibility
-    - can_omnitarian_eat: Boolean flag for omnitarian compatibility
-    - can_vegan_eat: Boolean flag for vegan compatibility
-    
-    Only returns active meal items (is_active = true).
+    Returns all records with all columns from the onboarding_meal_items table.
     
     **Note:** Use the main endpoint GET /onboarding to get all data in one request.
     """
 )
 async def get_meal_items() -> Dict[str, Any]:
     """
-    Get all meal items with their meal types and dietary preferences.
+    Get all meal items.
     
     Returns:
-        Dict containing success status and list of meal items with:
-        - onboarding_meal_item_name
-        - onboarding_meal_item_id
-        - onboarding_meal_item_image_url
-        - meal_type_name
-        - meal_type_id
-        - can_vegetarian_eat
-        - can_eggetarian_eat
-        - can_carnitarian_eat
-        - can_omnitarian_eat
-        - can_vegan_eat
-        
-    Only returns active onboarding_meal_items (is_active = true).
+        Dict containing success status and list of all meal items with all columns from the onboarding_meal_items table.
     """
     supabase = get_supabase_admin()
     
     try:
-        # Query the join table with related data
-        # Using inner join to ensure we only get records with valid relationships
-        response = supabase.table("onboarding_meal_items_meal_types") \
-            .select("""
-                onboarding_meal_item_id,
-                can_vegetarian_eat,
-                can_eggetarian_eat,
-                can_carnitarian_eat,
-                can_omnitarian_eat,
-                can_vegan_eat,
-                onboarding_meal_items!inner(id, name, image_url, is_active),
-                meal_types!inner(id, name)
-            """) \
-            .eq("onboarding_meal_items.is_active", True) \
+        # Query the onboarding_meal_items table directly - return all records and all columns
+        response = supabase.table("onboarding_meal_items") \
+            .select("*") \
+            .order("id") \
             .execute()
         
-        # Transform the response to match the requested format
-        formatted_data = []
-        for item in response.data:
-            meal_item = item.get("onboarding_meal_items", {})
-            meal_type = item.get("meal_types", {})
-            
-            formatted_item = {
-                "onboarding_meal_item_name": meal_item.get("name"),
-                "onboarding_meal_item_id": meal_item.get("id"),
-                "onboarding_meal_item_image_url": meal_item.get("image_url"),
-                "meal_type_name": meal_type.get("name"),
-                "meal_type_id": meal_type.get("id"),
-                "can_vegetarian_eat": item.get("can_vegetarian_eat"),
-                "can_eggetarian_eat": item.get("can_eggetarian_eat"),
-                "can_carnitarian_eat": item.get("can_carnitarian_eat"),
-                "can_omnitarian_eat": item.get("can_omnitarian_eat"),
-                "can_vegan_eat": item.get("can_vegan_eat")
-            }
-            formatted_data.append(formatted_item)
+        # Remove created_at from each item
+        data_without_created_at = [{k: v for k, v in item.items() if k != "created_at"} for item in response.data]
         
         return {
             "success": True,
-            "data": formatted_data
+            "data": data_without_created_at
         }
     except HTTPException:
         # Re-raise HTTP exceptions as-is
