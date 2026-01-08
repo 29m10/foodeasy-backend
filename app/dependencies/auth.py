@@ -42,46 +42,62 @@ async def get_current_user_id(
     
     # Verify Firebase token
     try:
+        print(f"[get_current_user_id] Verifying token (length: {len(token)})")
         decoded_token = verify_firebase_token(token)
         firebase_uid = decoded_token.get('uid')
         
+        print(f"[get_current_user_id] Token verified. Firebase UID: {firebase_uid}")
+        
         if not firebase_uid:
+            print(f"[get_current_user_id] ERROR: Missing firebase_uid in decoded token")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token: missing user identifier"
             )
         
         # Get user_id from Supabase using firebase_uid
+        print(f"[get_current_user_id] Looking up user in Supabase with firebase_uid: {firebase_uid}")
         result = auth_service.supabase.table('user_profiles') \
             .select('id') \
             .eq('firebase_uid', firebase_uid) \
             .execute()
         
+        print(f"[get_current_user_id] Supabase query result: {result.data}")
+        
         if not result.data or len(result.data) == 0:
+            print(f"[get_current_user_id] ERROR: User not found in Supabase for firebase_uid: {firebase_uid}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found. Please complete registration first."
+                detail="User not found. Please complete registration first by calling /auth/verify-otp."
             )
         
         user_id = result.data[0]['id']
-        return user_id
+        # Ensure user_id is always a string for consistent comparison
+        user_id_str = str(user_id)
+        print(f"[get_current_user_id] Successfully authenticated user_id: {user_id_str} (type: {type(user_id).__name__})")
+        return user_id_str
         
-    except firebase_auth.InvalidIdTokenError:
+    except firebase_auth.InvalidIdTokenError as e:
+        print(f"[get_current_user_id] InvalidIdTokenError: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token. Please login again.",
+            detail=f"Invalid token. Please login again. Error: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    except firebase_auth.ExpiredIdTokenError:
+    except firebase_auth.ExpiredIdTokenError as e:
+        print(f"[get_current_user_id] ExpiredIdTokenError: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token expired. Please login again.",
+            detail=f"Token expired. Please login again. Error: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
     except HTTPException:
         # Re-raise HTTP exceptions
         raise
     except Exception as e:
+        import traceback
+        print(f"[get_current_user_id] Unexpected error: {type(e).__name__}: {str(e)}")
+        print(f"[get_current_user_id] Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Authentication failed: {str(e)}",
@@ -108,11 +124,19 @@ async def verify_user_access(
     Raises:
         HTTPException: 403 if user tries to access another user's data
     """
-    if current_user_id != user_id:
+    # Ensure both are strings for comparison (URL params are strings, but DB might return int)
+    current_user_id_str = str(current_user_id)
+    user_id_str = str(user_id)
+    
+    print(f"[verify_user_access] Comparing: current_user_id='{current_user_id_str}' (type: {type(current_user_id).__name__}) vs user_id='{user_id_str}' (type: {type(user_id).__name__})")
+    
+    if current_user_id_str != user_id_str:
+        print(f"[verify_user_access] ❌ MISMATCH! Access denied.")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to access this resource"
+            detail=f"You don't have permission to access this resource. Your user_id is {current_user_id_str}, but you're trying to access {user_id_str}"
         )
     
-    return user_id
+    print(f"[verify_user_access] ✓ Match! Access granted.")
+    return user_id_str
 
