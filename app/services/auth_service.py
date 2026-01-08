@@ -40,16 +40,22 @@ class AuthService:
         if result.data and len(result.data) > 0:
             # Existing user - update last_login
             user = result.data[0]
-            print(f"Existing user found: {user['id']}")
+            user_id = user.get('id')
+            
+            if not user_id:
+                raise ValueError(f"User record found but missing 'id' field. User data: {user}")
+            
+            print(f"Existing user found: {user_id}")
             
             self.supabase.table('user_profiles') \
                 .update({'last_login': datetime.utcnow().isoformat()}) \
-                .eq('id', user['id']) \
+                .eq('id', user_id) \
                 .execute()
             
+            # Ensure all fields are correct types
             return {
-                'user_id': user['id'],
-                'phone_number': phone_number,
+                'user_id': str(user_id),  # Ensure it's a string
+                'phone_number': str(phone_number),  # Ensure it's a string
                 'is_new_user': False
             }
         else:
@@ -65,12 +71,21 @@ class AuthService:
                 .insert(new_user_data) \
                 .execute()
             
-            new_user = new_user_result.data[0]
-            print(f"New user created: {new_user['id']}")
+            if not new_user_result.data or len(new_user_result.data) == 0:
+                raise ValueError("Failed to create new user - no data returned from Supabase")
             
+            new_user = new_user_result.data[0]
+            user_id = new_user.get('id')
+            
+            if not user_id:
+                raise ValueError(f"New user created but missing 'id' field. User data: {new_user}")
+            
+            print(f"New user created: {user_id}")
+            
+            # Ensure all fields are correct types
             return {
-                'user_id': new_user['id'],
-                'phone_number': phone_number,
+                'user_id': str(user_id),  # Ensure it's a string
+                'phone_number': str(phone_number),  # Ensure it's a string
                 'is_new_user': True
             }
     

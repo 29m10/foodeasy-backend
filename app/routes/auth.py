@@ -154,7 +154,27 @@ async def verify_otp(request: VerifyTokenRequest) -> VerifyTokenResponse:
         
         user_data = await auth_service.verify_and_sync_user(request.id_token)
         print(f"[verify_otp] Successfully verified and synced user: {user_data.get('user_id')}")
-        return VerifyTokenResponse(**user_data)
+        print(f"[verify_otp] User data returned: {user_data}")
+        print(f"[verify_otp] Data types - user_id: {type(user_data.get('user_id'))}, phone_number: {type(user_data.get('phone_number'))}, is_new_user: {type(user_data.get('is_new_user'))}")
+        
+        # Validate data types before creating response
+        if not isinstance(user_data.get('user_id'), str):
+            raise ValueError(f"user_id must be a string, got {type(user_data.get('user_id'))}: {user_data.get('user_id')}")
+        if not isinstance(user_data.get('phone_number'), str):
+            raise ValueError(f"phone_number must be a string, got {type(user_data.get('phone_number'))}: {user_data.get('phone_number')}")
+        if not isinstance(user_data.get('is_new_user'), bool):
+            raise ValueError(f"is_new_user must be a bool, got {type(user_data.get('is_new_user'))}: {user_data.get('is_new_user')}")
+        
+        try:
+            response = VerifyTokenResponse(**user_data)
+            return response
+        except Exception as e:
+            print(f"[verify_otp] Validation error creating VerifyTokenResponse: {str(e)}")
+            print(f"[verify_otp] Attempted to create with data: {user_data}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Response validation failed: {str(e)}. Data: {user_data}"
+            )
         
     except HTTPException:
         # Re-raise HTTP exceptions as-is
