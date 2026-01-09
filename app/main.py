@@ -16,7 +16,7 @@ security = HTTPBearer()
 # Create FastAPI app
 app = FastAPI(
     title="FoodEasy API",
-    description="Backend API for FoodEasy - Meal Planning with Phone Authentication",
+    description="Backend API for FoodEasy",
     version="1.0.0",
     docs_url="/docs",  # Swagger UI
     redoc_url="/redoc"  # ReDoc
