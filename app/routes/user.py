@@ -457,9 +457,9 @@ def _structure_meal_plan_details(details_response_data: List[Dict[str, Any]]) ->
                         k: v for k, v in meal_item_info.items() 
                         if k not in ["is_active"]
                     }
-                    # Add the user_meal_plan_details id to the meal item
-                    if detail_id is not None:
-                        meal_item_clean["user_meal_plan_detail_id"] = detail_id
+                    # Always add the user_meal_plan_details id to the meal item
+                    # This is the primary key from user_meal_plan_details table
+                    meal_item_clean["user_meal_plan_detail_id"] = detail_id
                     dates_dict[detail_date][meal_type_id]["meal_items"].append(meal_item_clean)
     
     # Convert to list format
@@ -561,7 +561,7 @@ async def list_user_meal_plans(
 
 
 @router.get(
-    "/{user_id}/meal-plans/{user_meal_plan_id}",
+    "/{user_id}/meal-plans/details",
     status_code=status.HTTP_200_OK,
     summary="Get user meal plan details",
     description="""
@@ -572,7 +572,13 @@ async def list_user_meal_plans(
     
     **Authentication Required:** Bearer token in Authorization header.
     
-    **Response Structure:**
+    **Query Parameters:**
+    - user_meal_plan_id (optional): ID of the specific meal plan to fetch. If not provided, returns all active meal plans.
+    - is_active (optional): Filter by active status (true/false). Defaults to true if not specified.
+    - limit (optional): Maximum number of meal plans to return when user_meal_plan_id is not provided (default: 50, max: 100).
+    - max_dates (optional): Maximum number of dates to return across all meal plans (default: 500, max: 1000). Helps prevent very large responses.
+    
+    **Response Structure (Single Meal Plan):**
     ```json
     {
       "success": true,
@@ -589,6 +595,7 @@ async def list_user_meal_plans(
                   "id": 1,
                   "name": "Idli",
                   "description": "...",
+                  "user_meal_plan_detail_id": 123,
                   ...
                 }
               ]
@@ -599,81 +606,204 @@ async def list_user_meal_plans(
     }
     ```
     
+    **Note:** Each meal item includes `user_meal_plan_detail_id` which is the ID from the `user_meal_plan_details` table. This ID can be used for operations like swapping or removing meal items.
+    
+    **Response Structure (Multiple Meal Plans):**
+    ```json
+    {
+      "success": true,
+      "dates": [
+        {
+          "date": "2024-01-01",
+          "meals": [
+            {
+              "id": 1,
+              "name": "Breakfast",
+              "meal_items": [
+                {
+                  "id": 1,
+                  "name": "Idli",
+                  "user_meal_plan_detail_id": 123,
+                  ...
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "date": "2024-01-08",
+          "meals": [...]
+        }
+      ]
+    }
+    ```
+    
+    **Note:** When multiple meal plans are returned, all dates from all meal plans are combined into a single `dates` array, sorted by date. Each meal item includes `user_meal_plan_detail_id` which is the ID from the `user_meal_plan_details` table.
+    
     Only returns active meal plan details (where is_active = true).
+    If no user_meal_plan_id is provided, returns all active meal plans (up to limit).
     """
 )
 async def get_user_meal_plan(
     user_id: str = Depends(verify_user_access),
-    user_meal_plan_id: int = Path(..., description="ID of the user meal plan", gt=0)
+    user_meal_plan_id: Optional[int] = Query(None, description="ID of the user meal plan. If not provided, returns all active meal plans.", gt=0),
+    is_active: Optional[bool] = Query(True, description="Filter by active status (only used when user_meal_plan_id is not provided)"),
+    limit: int = Query(50, description="Maximum number of meal plans to return when user_meal_plan_id is not provided", ge=1, le=100),
+    max_dates: int = Query(500, description="Maximum number of dates to return across all meal plans (helps prevent very large responses)", ge=1, le=1000)
 ) -> Dict[str, Any]:
     """
-    Get user meal plan with hierarchical structure.
+    Get user meal plan(s) with hierarchical structure.
+    
+    If user_meal_plan_id is provided, returns that specific meal plan.
+    If not provided, returns all active meal plans (up to limit).
     
     Returns:
         Dict containing plan information and hierarchical meal plan details.
+        Structure differs based on whether single or multiple plans are returned.
     """
     supabase = get_supabase_admin()
     
     try:
-        # Verify meal plan exists
-        plan_response = supabase.table("user_meal_plan") \
-            .select("id") \
-            .eq("id", user_meal_plan_id) \
-            .execute()
-        
-        if not plan_response.data or len(plan_response.data) == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Meal plan with id {user_meal_plan_id} not found"
-            )
-        
-        # Get meal plan details with joins to meal_types and meal_items
-        # Using Supabase's foreign key relationship syntax
-        details_response = supabase.table("user_meal_plan_details") \
-            .select("""
-                id,
-                date,
-                is_active,
-                meal_type_id,
-                meal_item_id,
-                meal_types (
-                    id,
-                    name,
-                    description,
-                    is_active,
-                    created_at
-                ),
-                meal_items (
-                    id,
-                    name,
-                    description,
-                    image_url,
-                    can_vegetarian_eat,
-                    can_eggetarian_eat,
-                    can_carnitarian_eat,
-                    can_omnitarian_eat,
-                    can_vegan_eat,
-                    is_breakfast,
-                    is_lunch,
-                    is_snacks,
-                    is_dinner,
-                    recipe_link,
-                    created_at
+        # If user_meal_plan_id is provided, return single meal plan
+        if user_meal_plan_id is not None:
+            # Verify meal plan exists
+            plan_response = supabase.table("user_meal_plan") \
+                .select("id") \
+                .eq("id", user_meal_plan_id) \
+                .execute()
+            
+            if not plan_response.data or len(plan_response.data) == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Meal plan with id {user_meal_plan_id} not found"
                 )
-            """) \
-            .eq("user_meal_plan_id", user_meal_plan_id) \
-            .eq("is_active", True) \
-            .order("date") \
-            .order("meal_type_id") \
-            .execute()
+            
+            # Get meal plan details with joins to meal_types and meal_items
+            details_response = supabase.table("user_meal_plan_details") \
+                .select("""
+                    id,
+                    date,
+                    is_active,
+                    meal_type_id,
+                    meal_item_id,
+                    meal_types (
+                        id,
+                        name,
+                        description,
+                        is_active,
+                        created_at
+                    ),
+                    meal_items (
+                        id,
+                        name,
+                        description,
+                        image_url,
+                        can_vegetarian_eat,
+                        can_eggetarian_eat,
+                        can_carnitarian_eat,
+                        can_omnitarian_eat,
+                        can_vegan_eat,
+                        is_breakfast,
+                        is_lunch,
+                        is_snacks,
+                        is_dinner,
+                        recipe_link,
+                        created_at
+                    )
+                """) \
+                .eq("user_meal_plan_id", user_meal_plan_id) \
+                .eq("is_active", True) \
+                .order("date") \
+                .order("meal_type_id") \
+                .execute()
+            
+            # Structure the data hierarchically using helper function
+            dates_list = _structure_meal_plan_details(details_response.data)
+            
+            return {
+                "success": True,
+                "dates": dates_list,
+                "total_dates": len(dates_list)
+            }
         
-        # Structure the data hierarchically using helper function
-        dates_list = _structure_meal_plan_details(details_response.data)
-        
-        return {
-            "success": True,
-            "dates": dates_list
-        }
+        # If user_meal_plan_id is not provided, return all meal plans
+        else:
+            # Get all active meal plans
+            plans_query = supabase.table("user_meal_plan") \
+                .select("id") \
+                .order("created_at", desc=True) \
+                .limit(limit)
+            
+            if is_active is not None:
+                plans_query = plans_query.eq("is_active", is_active)
+            
+            plans_response = plans_query.execute()
+            
+            if not plans_response.data or len(plans_response.data) == 0:
+                return {
+                    "success": True,
+                    "count": 0,
+                    "data": []
+                }
+            
+            # Get details for all meal plans and combine them
+            all_details_data = []
+            for plan in plans_response.data:
+                plan_id = plan.get("id")
+                
+                # Get meal plan details with joins
+                details_response = supabase.table("user_meal_plan_details") \
+                    .select("""
+                        id,
+                        date,
+                        is_active,
+                        meal_type_id,
+                        meal_item_id,
+                        meal_types (
+                            id,
+                            name,
+                            description,
+                            is_active,
+                            created_at
+                        ),
+                        meal_items (
+                            id,
+                            name,
+                            description,
+                            image_url,
+                            can_vegetarian_eat,
+                            can_eggetarian_eat,
+                            can_carnitarian_eat,
+                            can_omnitarian_eat,
+                            can_vegan_eat,
+                            is_breakfast,
+                            is_lunch,
+                            is_snacks,
+                            is_dinner,
+                            recipe_link,
+                            created_at
+                        )
+                    """) \
+                    .eq("user_meal_plan_id", plan_id) \
+                    .eq("is_active", True) \
+                    .execute()
+                
+                # Combine all details from all meal plans
+                all_details_data.extend(details_response.data)
+            
+            # Structure all dates hierarchically (combines dates from all meal plans)
+            all_dates_list = _structure_meal_plan_details(all_details_data)
+            
+            # Apply max_dates limit if specified
+            if len(all_dates_list) > max_dates:
+                all_dates_list = all_dates_list[:max_dates]
+            
+            return {
+                "success": True,
+                "dates": all_dates_list,
+                "total_dates": len(all_dates_list),
+                "limit_applied": len(all_dates_list) >= max_dates if user_meal_plan_id is None else False
+            }
         
     except HTTPException:
         # Re-raise HTTP exceptions as-is
