@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
 from app.routes import onboarding, auth, cook, user, meal_items, meal_plan
+from app.test.routes import test_meal_generation, test_user_creation
 import os
 from dotenv import load_dotenv
 
@@ -90,6 +91,10 @@ app.include_router(user.router)
 app.include_router(cook.router)
 app.include_router(meal_items.router)
 app.include_router(meal_plan.router)
+
+# Include test routers
+app.include_router(test_meal_generation.router)
+app.include_router(test_user_creation.router)
 
 # Root endpoint
 @app.get("/")
