@@ -512,8 +512,7 @@ def _structure_meal_plan_details(details_response_data: List[Dict[str, Any]]) ->
     }
     ```
     
-    **Note:** Currently returns all meal plans. If you need user-specific filtering,
-    add a `user_id` column to the `user_meal_plan` table.
+    Returns only meal plans belonging to the authenticated user.
     """
 )
 async def list_user_meal_plans(
@@ -532,7 +531,8 @@ async def list_user_meal_plans(
     
     try:
         query = supabase.table("user_meal_plan") \
-            .select("*", count="exact")
+            .select("*", count="exact") \
+            .eq("user_id", user_id)
         
         # Apply filters
         if is_active is not None:
@@ -666,16 +666,17 @@ async def get_user_meal_plan(
     try:
         # If user_meal_plan_id is provided, return single meal plan
         if user_meal_plan_id is not None:
-            # Verify meal plan exists
+            # Verify meal plan exists and belongs to user
             plan_response = supabase.table("user_meal_plan") \
                 .select("id") \
                 .eq("id", user_meal_plan_id) \
+                .eq("user_id", user_id) \
                 .execute()
             
             if not plan_response.data or len(plan_response.data) == 0:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Meal plan with id {user_meal_plan_id} not found"
+                    detail=f"Meal plan with id {user_meal_plan_id} not found or does not belong to you"
                 )
             
             # Get meal plan details with joins to meal_types and meal_items
@@ -726,11 +727,12 @@ async def get_user_meal_plan(
                 "total_dates": len(dates_list)
             }
         
-        # If user_meal_plan_id is not provided, return all meal plans
+        # If user_meal_plan_id is not provided, return all meal plans for user
         else:
-            # Get all active meal plans
+            # Get all active meal plans for this user
             plans_query = supabase.table("user_meal_plan") \
                 .select("id") \
+                .eq("user_id", user_id) \
                 .order("created_at", desc=True) \
                 .limit(limit)
             
@@ -894,14 +896,16 @@ async def get_multiple_user_meal_plans(
         
         # Get meal plans
         if plan_id_list:
-            # Fetch specific plans
+            # Fetch specific plans that belong to user
             plans_query = supabase.table("user_meal_plan") \
                 .select("*") \
+                .eq("user_id", user_id) \
                 .in_("id", plan_id_list)
         else:
-            # Fetch plans with filters
+            # Fetch plans with filters for this user
             plans_query = supabase.table("user_meal_plan") \
-                .select("*")
+                .select("*") \
+                .eq("user_id", user_id)
             
             if is_active is not None:
                 plans_query = plans_query.eq("is_active", is_active)
@@ -1069,6 +1073,19 @@ async def swap_meal_item(
                 detail="Existing meal plan detail is missing required fields"
             )
         
+        # Verify the meal plan belongs to the user
+        plan_ownership_check = supabase.table("user_meal_plan") \
+            .select("id") \
+            .eq("id", user_meal_plan_id) \
+            .eq("user_id", user_id) \
+            .execute()
+        
+        if not plan_ownership_check.data or len(plan_ownership_check.data) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to modify this meal plan"
+            )
+        
         # Verify the new meal item exists
         meal_item_response = supabase.table("meal_items") \
             .select("id") \
@@ -1186,16 +1203,17 @@ async def add_meal_item(
     supabase = get_supabase_admin()
     
     try:
-        # Verify the meal plan exists
+        # Verify the meal plan exists and belongs to user
         plan_response = supabase.table("user_meal_plan") \
             .select("id") \
             .eq("id", request.user_meal_plan_id) \
+            .eq("user_id", user_id) \
             .execute()
         
         if not plan_response.data or len(plan_response.data) == 0:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Meal plan with id {request.user_meal_plan_id} not found"
+                detail=f"Meal plan with id {request.user_meal_plan_id} not found or does not belong to you"
             )
         
         # Verify the meal type exists
@@ -1314,6 +1332,23 @@ async def remove_meal_item(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Active meal plan detail with id {request.user_meal_plan_detail_id} not found"
             )
+        
+        existing_detail = existing_detail_response.data[0]
+        user_meal_plan_id = existing_detail.get("user_meal_plan_id")
+        
+        # Verify the meal plan belongs to the user
+        if user_meal_plan_id:
+            plan_ownership_check = supabase.table("user_meal_plan") \
+                .select("id") \
+                .eq("id", user_meal_plan_id) \
+                .eq("user_id", user_id) \
+                .execute()
+            
+            if not plan_ownership_check.data or len(plan_ownership_check.data) == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to modify this meal plan"
+                )
         
         # Set is_active = false
         update_response = supabase.table("user_meal_plan_details") \

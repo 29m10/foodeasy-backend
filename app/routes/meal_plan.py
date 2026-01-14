@@ -1,11 +1,12 @@
 # app/routes/meal_plan.py
 
-from fastapi import APIRouter, HTTPException, status, Path
+from fastapi import APIRouter, HTTPException, status, Path, Depends
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 from app.services.meal_generation_service import meal_generation_service
 from app.services.supabase_client import get_supabase_admin
+from app.dependencies.auth import verify_user_access
 
 router = APIRouter(prefix="/meal-plan", tags=["Meal Plan Generation"])
 
@@ -63,7 +64,7 @@ class GenerateMealPlanRequest(BaseModel):
     """
 )
 async def generate_and_store_meal_plan(
-    user_id: str = Path(..., description="User ID (UUID) to generate meal plan for"),
+    user_id: str = Depends(verify_user_access),
     request: GenerateMealPlanRequest = GenerateMealPlanRequest()
 ) -> Dict[str, Any]:
     """
@@ -104,8 +105,8 @@ async def generate_and_store_meal_plan(
         meal_type_mapping = await _get_meal_type_mapping(supabase)
         
         # Create user_meal_plan record
-        # Note: user_meal_plan table does not have user_id column per schema
         meal_plan_record = {
+            "user_id": user_id,
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
             "is_active": True
