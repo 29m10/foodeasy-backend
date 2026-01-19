@@ -460,6 +460,83 @@ async def _fetch_grocery_items_for_meal_items(meal_item_ids: List[int]) -> Dict[
         return {}
 
 
+async def _fetch_nutrients_for_meal_items(meal_item_ids: List[int]) -> Dict[int, List[Dict[str, str]]]:
+    """
+    Fetch nutrients with hex colors for multiple meal items.
+    
+    Args:
+        meal_item_ids: List of meal item IDs to fetch nutrients for
+        
+    Returns:
+        Dict mapping meal_item_id to list of nutrients with their hex colors
+        Example: {
+            1: [
+                {"nutrient": "Protein", "color_hex": "#FF5733"},
+                {"nutrient": "Carbohydrates", "color_hex": "#33FF57"}
+            ],
+            2: [
+                {"nutrient": "Fiber", "color_hex": "#3357FF"}
+            ]
+        }
+    """
+    if not meal_item_ids:
+        return {}
+    
+    supabase = get_supabase_admin()
+    
+    try:
+        # Fetch nutrients for these meal items using the junction table
+        nutrients_response = supabase.table("meal_item_nutrients") \
+            .select("""
+                meal_item_id,
+                master_nutrients (
+                    nutrient,
+                    color_hex
+                )
+            """) \
+            .in_("meal_item_id", meal_item_ids) \
+            .eq("is_active", True) \
+            .execute()
+        
+        # Group nutrients by meal_item_id
+        meal_item_nutrients = {}
+        
+        if nutrients_response.data:
+            for item in nutrients_response.data:
+                meal_item_id = item.get("meal_item_id")
+                nutrient_data = item.get("master_nutrients")
+                
+                if not nutrient_data or not meal_item_id:
+                    continue
+                
+                # Initialize list for this meal item if not exists
+                if meal_item_id not in meal_item_nutrients:
+                    meal_item_nutrients[meal_item_id] = []
+                
+                # Get nutrient name and color_hex
+                nutrient_name = nutrient_data.get("nutrient")
+                color_hex = nutrient_data.get("color_hex")
+                
+                if not nutrient_name or not color_hex:
+                    continue
+                
+                # Create nutrient object
+                nutrient_obj = {
+                    "nutrient": nutrient_name,
+                    "color_hex": color_hex
+                }
+                
+                # Avoid duplicates (check if this nutrient already exists for this meal item)
+                if nutrient_obj not in meal_item_nutrients[meal_item_id]:
+                    meal_item_nutrients[meal_item_id].append(nutrient_obj)
+        
+        return meal_item_nutrients
+        
+    except Exception as e:
+        print(f"Error fetching nutrients for meal items: {e}")
+        return {}
+
+
 def _structure_meal_plan_details(details_response_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Helper function to structure meal plan details hierarchically.
@@ -647,6 +724,7 @@ async def list_user_meal_plans(
     - Meal type level: Grouped by meal type within each date
     - Meal items: List of meal items for each meal type
     - Grocery items: Each meal item includes grocery items grouped by their type
+    - Nutrients: Each meal item includes nutrients with their color hex codes
     
     **Authentication Required:** Bearer token in Authorization header.
     
@@ -679,6 +757,16 @@ async def list_user_meal_plans(
                     "Spices & Condiments": ["Salt"],
                     "Vegetables": ["Curry Leaves"]
                   },
+                  "nutrients": [
+                    {
+                      "nutrient": "Protein",
+                      "color_hex": "#FF5733"
+                    },
+                    {
+                      "nutrient": "Carbohydrates",
+                      "color_hex": "#33FF57"
+                    }
+                  ],
                   ...
                 }
               ]
@@ -692,6 +780,7 @@ async def list_user_meal_plans(
     **Note:** 
     - Each meal item includes `user_meal_plan_detail_id` which is the ID from the `user_meal_plan_details` table. This ID can be used for operations like swapping or removing meal items.
     - Each meal item includes `grocery_items_by_type` which contains the ingredient names grouped by their type.
+    - Each meal item includes `nutrients` which is an array of nutrient objects with their name and color hex code.
     
     **Response Structure (Multiple Meal Plans):**
     ```json
@@ -712,6 +801,12 @@ async def list_user_meal_plans(
                   "grocery_items_by_type": {
                     "Grains, Cereals & Grain Products": ["Rice", "Urad Dal"]
                   },
+                  "nutrients": [
+                    {
+                      "nutrient": "Protein",
+                      "color_hex": "#FF5733"
+                    }
+                  ],
                   ...
                 }
               ]
@@ -730,6 +825,7 @@ async def list_user_meal_plans(
     - When multiple meal plans are returned, all dates from all meal plans are combined into a single `dates` array, sorted by date. 
     - Each meal item includes `user_meal_plan_detail_id` which is the ID from the `user_meal_plan_details` table.
     - Each meal item includes `grocery_items_by_type` which contains the ingredient names grouped by their type.
+    - Each meal item includes `nutrients` which is an array of nutrient objects with their name and color hex code.
     
     Only returns active meal plan details (where is_active = true).
     If no user_meal_plan_id is provided, returns all active meal plans (up to limit).
@@ -812,7 +908,7 @@ async def get_user_meal_plan(
             # Structure the data hierarchically using helper function
             dates_list = _structure_meal_plan_details(details_response.data)
             
-            # Fetch grocery items for all meal items
+            # Fetch grocery items and nutrients for all meal items
             meal_item_ids = []
             for date_entry in dates_list:
                 for meal in date_entry.get("meals", []):
@@ -821,11 +917,12 @@ async def get_user_meal_plan(
                         if meal_item_id:
                             meal_item_ids.append(meal_item_id)
             
-            # Fetch grocery items if there are meal items
+            # Fetch grocery items and nutrients if there are meal items
             if meal_item_ids:
                 grocery_items_map = await _fetch_grocery_items_for_meal_items(meal_item_ids)
+                nutrients_map = await _fetch_nutrients_for_meal_items(meal_item_ids)
                 
-                # Enrich each meal item with grocery items
+                # Enrich each meal item with grocery items and nutrients
                 for date_entry in dates_list:
                     for meal in date_entry.get("meals", []):
                         for meal_item in meal.get("meal_items", []):
@@ -834,6 +931,11 @@ async def get_user_meal_plan(
                                 meal_item["grocery_items_by_type"] = grocery_items_map[meal_item_id]
                             else:
                                 meal_item["grocery_items_by_type"] = {}
+                            
+                            if meal_item_id and meal_item_id in nutrients_map:
+                                meal_item["nutrients"] = nutrients_map[meal_item_id]
+                            else:
+                                meal_item["nutrients"] = []
             
             return {
                 "success": True,
@@ -914,7 +1016,7 @@ async def get_user_meal_plan(
             if len(all_dates_list) > max_dates:
                 all_dates_list = all_dates_list[:max_dates]
             
-            # Fetch grocery items for all meal items
+            # Fetch grocery items and nutrients for all meal items
             meal_item_ids = []
             for date_entry in all_dates_list:
                 for meal in date_entry.get("meals", []):
@@ -923,11 +1025,12 @@ async def get_user_meal_plan(
                         if meal_item_id:
                             meal_item_ids.append(meal_item_id)
             
-            # Fetch grocery items if there are meal items
+            # Fetch grocery items and nutrients if there are meal items
             if meal_item_ids:
                 grocery_items_map = await _fetch_grocery_items_for_meal_items(meal_item_ids)
+                nutrients_map = await _fetch_nutrients_for_meal_items(meal_item_ids)
                 
-                # Enrich each meal item with grocery items
+                # Enrich each meal item with grocery items and nutrients
                 for date_entry in all_dates_list:
                     for meal in date_entry.get("meals", []):
                         for meal_item in meal.get("meal_items", []):
@@ -936,6 +1039,11 @@ async def get_user_meal_plan(
                                 meal_item["grocery_items_by_type"] = grocery_items_map[meal_item_id]
                             else:
                                 meal_item["grocery_items_by_type"] = {}
+                            
+                            if meal_item_id and meal_item_id in nutrients_map:
+                                meal_item["nutrients"] = nutrients_map[meal_item_id]
+                            else:
+                                meal_item["nutrients"] = []
             
             return {
                 "success": True,
@@ -1106,7 +1214,7 @@ async def get_multiple_user_meal_plans(
             # Structure the data hierarchically
             dates_list = _structure_meal_plan_details(details_response.data)
             
-            # Fetch grocery items for all meal items in this plan
+            # Fetch grocery items and nutrients for all meal items in this plan
             meal_item_ids = []
             for date_entry in dates_list:
                 for meal in date_entry.get("meals", []):
@@ -1115,11 +1223,12 @@ async def get_multiple_user_meal_plans(
                         if meal_item_id:
                             meal_item_ids.append(meal_item_id)
             
-            # Fetch grocery items if there are meal items
+            # Fetch grocery items and nutrients if there are meal items
             if meal_item_ids:
                 grocery_items_map = await _fetch_grocery_items_for_meal_items(meal_item_ids)
+                nutrients_map = await _fetch_nutrients_for_meal_items(meal_item_ids)
                 
-                # Enrich each meal item with grocery items
+                # Enrich each meal item with grocery items and nutrients
                 for date_entry in dates_list:
                     for meal in date_entry.get("meals", []):
                         for meal_item in meal.get("meal_items", []):
@@ -1128,6 +1237,11 @@ async def get_multiple_user_meal_plans(
                                 meal_item["grocery_items_by_type"] = grocery_items_map[meal_item_id]
                             else:
                                 meal_item["grocery_items_by_type"] = {}
+                            
+                            if meal_item_id and meal_item_id in nutrients_map:
+                                meal_item["nutrients"] = nutrients_map[meal_item_id]
+                            else:
+                                meal_item["nutrients"] = []
             
             plans_with_details.append({
                 "dates": dates_list
