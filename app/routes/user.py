@@ -6,6 +6,11 @@ from app.services.auth_service import auth_service
 from app.services.supabase_client import get_supabase_admin
 from app.dependencies.auth import verify_user_access
 from typing import Dict, Any, List, Optional
+import httpx
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 router = APIRouter(prefix="/user", tags=["User Management"])
 
@@ -453,6 +458,156 @@ async def deactivate_user(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to deactivate user: {str(e)}"
+        )
+
+
+@router.get(
+    "/{user_id}/whatsapp-group-link",
+    status_code=status.HTTP_200_OK,
+    summary="Get or create WhatsApp group invite link",
+    description="""
+    Get the user's WhatsApp group invite link. If no link exists, creates a new WhatsApp group
+    via Periskope API and stores the response in user metadata.
+    
+    **Authentication Required:** Bearer token in Authorization header.
+    
+    **Flow:**
+    1. Checks if user has `whatsapp_group_invite_link` in metadata
+    2. If exists, returns the stored link
+    3. If not, calls Periskope API to create a new WhatsApp group
+    4. Stores the entire Periskope API response in `whatsapp_group_metadata` in user metadata
+    5. Extracts and stores the invite link in `whatsapp_group_invite_link` in user metadata
+    6. Returns only the invite link
+    
+    **Response:**
+    ```json
+    {
+      "success": true,
+      "whatsapp_group_invite_link": "https://chat.whatsapp.com/..."
+    }
+    ```
+    
+    **Environment Variables Required:**
+    - `PERISKOPE_API_PHONE`: Phone number for Periskope API (e.g., "919952907025")
+    - `PERISKOPE_API_TOKEN`: Bearer token for Periskope API authorization
+    """
+)
+async def get_whatsapp_group_link(
+    user_id: str = Depends(verify_user_access)
+) -> Dict[str, Any]:
+    """Get or create WhatsApp group invite link for user"""
+    try:
+        # Get current user
+        user = await auth_service.get_user_by_id(user_id)
+        metadata = user.get('metadata', {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        
+        # Check if invite link already exists
+        existing_link = metadata.get('whatsapp_group_invite_link')
+        if existing_link:
+            return {
+                "success": True,
+                "whatsapp_group_invite_link": existing_link
+            }
+        
+        # If no link exists, create a new WhatsApp group via Periskope API
+        periskope_phone = os.getenv("PERISKOPE_PHONE_NUMBER")
+        periskope_token = os.getenv("PERISKOPE_API_TOKEN")
+        group_image_url = os.getenv("FOODEASY_GROUP_IMAGE_URL")
+        periskope_base_url = os.getenv("PERISKOPE_API_BASE_URL")
+        
+        # Generate group name based on user info
+        user_name = user.get('full_name', 'User')
+        group_name = f"{user_name}'s FoodEasy"
+        
+        # Prepare request to Periskope API
+        url = f"{periskope_base_url}/chats/create"
+        headers = {
+            "x-phone": periskope_phone,
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {periskope_token}"
+        }
+        payload = {
+            "group_name": group_name,
+            "participants": [""],
+            "options": {
+                "description": "FoodEasy bot will send your daily meal reminders here",
+                "image": group_image_url,
+                "messagesAdminsOnly": False,
+                "infoAdminsOnly": False,
+                "addMembersAdminsOnly": False,
+                "force_add_participants": False
+            }
+        }
+        
+        # Call Periskope API
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            
+            if response.status_code != 200:
+                error_text = response.text
+                print(f"Periskope API error {response.status_code}: {error_text}")
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Failed to create WhatsApp group: {error_text}"
+                )
+            
+            periskope_response = response.json()
+        
+        # Store the entire Periskope response in metadata
+        metadata['whatsapp_group_metadata'] = periskope_response
+        
+        # Extract invite link from stored metadata
+        invite_link = metadata.get('whatsapp_group_metadata', {}).get('invite_link')
+        
+        if not invite_link:
+            # If we can't find the link, log the response for debugging
+            print(f"Warning: Could not extract invite link from Periskope response: {periskope_response}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="WhatsApp group created but invite link not found in response"
+            )
+        
+        # Store the invite link in metadata
+        metadata['whatsapp_group_invite_link'] = invite_link
+        
+        # Update user metadata
+        await auth_service.update_user_profile(user_id, {'metadata': metadata})
+        
+        return {
+            "success": True,
+            "whatsapp_group_invite_link": invite_link
+        }
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        error_msg = str(e)
+        if "deactivated" in error_msg.lower():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=error_msg
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_msg
+        )
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Request to Periskope API timed out"
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to connect to Periskope API: {str(e)}"
+        )
+    except Exception as e:
+        print(f"Error in get_whatsapp_group_link: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get WhatsApp group link: {str(e)}"
         )
 
 
