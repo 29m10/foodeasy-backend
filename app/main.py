@@ -28,48 +28,66 @@ def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
     
-    from fastapi.openapi.utils import get_openapi
-    
-    openapi_schema = get_openapi(
-        title=app.title,
-        version=app.version,
-        description=app.description,
-        routes=app.routes,
-    )
-    
-    # Add security scheme for Bearer token
-    openapi_schema["components"]["securitySchemes"] = {
-        "Bearer": {
-            "type": "http",
-            "scheme": "bearer",
-            "bearerFormat": "JWT",
-            "description": "Enter your Firebase ID token. Get it by calling POST /auth/verify-otp with your id_token."
-        }
-    }
-    
-    # Add security requirements to protected endpoints
-    # Protected endpoints are those under /user, /cook, /meal-plan, /grocery paths (except /auth/verify-otp)
-    protected_paths = ["/user", "/cook", "/meal-plan", "/grocery"]
-    
-    for path, path_item in openapi_schema.get("paths", {}).items():
-        # Check if this is a protected path
-        is_protected = any(path.startswith(protected) for protected in protected_paths)
+    try:
+        from fastapi.openapi.utils import get_openapi
+        import logging
         
-        # Skip /auth/verify-otp (it's public)
-        if path == "/auth/verify-otp":
-            continue
+        logger = logging.getLogger(__name__)
+        
+        openapi_schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+        
+        # Ensure components section exists
+        if "components" not in openapi_schema:
+            openapi_schema["components"] = {}
+        
+        # Add security scheme for Bearer token
+        openapi_schema["components"]["securitySchemes"] = {
+            "Bearer": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+                "description": "Enter your Firebase ID token. Get it by calling POST /auth/verify-otp with your id_token."
+            }
+        }
+        
+        # Add security requirements to protected endpoints
+        # Protected endpoints are those under /user, /cook, /meal-plan, /grocery paths (except /auth/verify-otp)
+        protected_paths = ["/user", "/cook", "/meal-plan", "/grocery"]
+        
+        for path, path_item in openapi_schema.get("paths", {}).items():
+            # Check if this is a protected path
+            is_protected = any(path.startswith(protected) for protected in protected_paths)
             
-        if is_protected:
-            # Add security requirement to all methods (get, post, put, delete, etc.)
-            for method in ["get", "post", "put", "delete", "patch"]:
-                if method in path_item:
-                    if "security" not in path_item[method]:
-                        path_item[method]["security"] = [{"Bearer": []}]
-    
-    app.openapi_schema = openapi_schema
-    return app.openapi_schema
-
-app.openapi = custom_openapi
+            # Skip /auth/verify-otp (it's public)
+            if path == "/auth/verify-otp":
+                continue
+                
+            if is_protected:
+                # Add security requirement to all methods (get, post, put, delete, etc.)
+                for method in ["get", "post", "put", "delete", "patch"]:
+                    if method in path_item:
+                        if "security" not in path_item[method]:
+                            path_item[method]["security"] = [{"Bearer": []}]
+        
+        app.openapi_schema = openapi_schema
+        return app.openapi_schema
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error generating OpenAPI schema: {str(e)}", exc_info=True)
+        # Fallback to default OpenAPI schema if custom generation fails
+        from fastapi.openapi.utils import get_openapi
+        return get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
 
 # CORS middleware (allow frontend to access API)
 cors_origins = os.getenv("CORS_ORIGINS", "*")
@@ -97,6 +115,9 @@ app.include_router(meal_messaging.router)
 # Include test routers
 app.include_router(test_meal_generation.router)
 app.include_router(test_user_creation.router)
+
+# Set custom OpenAPI schema after all routers are included
+app.openapi = custom_openapi
 
 # Root endpoint
 @app.get("/")
