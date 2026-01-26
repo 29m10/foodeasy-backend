@@ -6,9 +6,206 @@ Routes for fetching meal items with various filters.
 
 from fastapi import APIRouter, HTTPException, status, Query
 from app.services.supabase_client import get_supabase_admin
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 router = APIRouter(prefix="/meal-items", tags=["Meal Items"])
+
+
+async def _fetch_grocery_items_for_meal_items(meal_item_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
+    """
+    Fetch all grocery items for multiple meal items.
+    Each grocery item includes its details and tag from meal_item_ingredients table.
+    
+    Args:
+        meal_item_ids: List of meal item IDs to fetch groceries for
+        
+    Returns:
+        Dict mapping meal_item_id to list of grocery items
+        Example: {
+            1: [
+                {
+                    "id": 10,
+                    "name": "Rice",
+                    "type": "Grains, Cereals & Grain Products",
+                    "type_id": 1,
+                    "tag": "main_item"
+                },
+                {
+                    "id": 11,
+                    "name": "Tomato",
+                    "type": "Vegetables",
+                    "type_id": 3,
+                    "tag": "vegetable_item"
+                }
+            ]
+        }
+    """
+    if not meal_item_ids:
+        return {}
+    
+    supabase = get_supabase_admin()
+    
+    try:
+        # Fetch ingredients with tags from meal_item_ingredients junction table
+        ingredients_response = supabase.table("meal_item_ingredients") \
+            .select("""
+                meal_item_id,
+                is_main_item,
+                is_fruit_item,
+                is_vegetable_item,
+                is_spices_seeds_oils_item,
+                meal_ingredients (
+                    id,
+                    name,
+                    meal_ingredients_types (
+                        id,
+                        name
+                    )
+                )
+            """) \
+            .in_("meal_item_id", meal_item_ids) \
+            .eq("is_active", True) \
+            .execute()
+        
+        # Group ingredients by meal_item_id as a list
+        meal_item_groceries = {}
+        
+        # Define tag field mappings
+        tag_fields = {
+            "is_main_item": "main_item",
+            "is_fruit_item": "fruit_item",
+            "is_vegetable_item": "vegetable_item",
+            "is_spices_seeds_oils_item": "spices_seeds_oils_item"
+        }
+        
+        if ingredients_response.data:
+            for item in ingredients_response.data:
+                meal_item_id = item.get("meal_item_id")
+                ingredient_data = item.get("meal_ingredients")
+                
+                if not ingredient_data or not meal_item_id:
+                    continue
+                
+                # Initialize list for this meal item if not exists
+                if meal_item_id not in meal_item_groceries:
+                    meal_item_groceries[meal_item_id] = []
+                
+                # Get ingredient details
+                ingredient_name = ingredient_data.get("name")
+                ingredient_id = ingredient_data.get("id")
+                ingredient_type_data = ingredient_data.get("meal_ingredients_types")
+                
+                if not ingredient_name:
+                    continue
+                
+                # Get type name, default to "Uncategorized"
+                type_name = "Uncategorized"
+                type_id = None
+                if ingredient_type_data:
+                    type_name = ingredient_type_data.get("name", "Uncategorized")
+                    type_id = ingredient_type_data.get("id")
+                
+                # Find the first active tag (only one tag per grocery item)
+                tag = None
+                for field_name, tag_name in tag_fields.items():
+                    if item.get(field_name, False):
+                        tag = tag_name
+                        break
+                
+                # Create grocery item object
+                grocery_item = {
+                    "id": ingredient_id,
+                    "name": ingredient_name,
+                    "type": type_name,
+                    "type_id": type_id,
+                    "tag": tag
+                }
+                
+                # Add to the list for this meal item
+                meal_item_groceries[meal_item_id].append(grocery_item)
+        
+        return meal_item_groceries
+        
+    except Exception as e:
+        print(f"Error fetching grocery items for meal items: {e}")
+        return {}
+
+
+async def _fetch_nutrients_for_meal_items(meal_item_ids: List[int]) -> Dict[int, List[Dict[str, str]]]:
+    """
+    Fetch nutrients with hex colors for multiple meal items.
+    
+    Args:
+        meal_item_ids: List of meal item IDs to fetch nutrients for
+        
+    Returns:
+        Dict mapping meal_item_id to list of nutrients with their hex colors
+        Example: {
+            1: [
+                {"nutrient": "Protein", "color_hex": "#FF5733"},
+                {"nutrient": "Carbohydrates", "color_hex": "#33FF57"}
+            ],
+            2: [
+                {"nutrient": "Fiber", "color_hex": "#3357FF"}
+            ]
+        }
+    """
+    if not meal_item_ids:
+        return {}
+    
+    supabase = get_supabase_admin()
+    
+    try:
+        # Fetch nutrients for these meal items using the junction table
+        nutrients_response = supabase.table("meal_item_nutrients") \
+            .select("""
+                meal_item_id,
+                master_nutrients (
+                    nutrient,
+                    color_hex
+                )
+            """) \
+            .in_("meal_item_id", meal_item_ids) \
+            .eq("is_active", True) \
+            .execute()
+        
+        # Group nutrients by meal_item_id
+        meal_item_nutrients = {}
+        
+        if nutrients_response.data:
+            for item in nutrients_response.data:
+                meal_item_id = item.get("meal_item_id")
+                nutrient_data = item.get("master_nutrients")
+                
+                if not nutrient_data or not meal_item_id:
+                    continue
+                
+                # Initialize list for this meal item if not exists
+                if meal_item_id not in meal_item_nutrients:
+                    meal_item_nutrients[meal_item_id] = []
+                
+                # Get nutrient name and color_hex
+                nutrient_name = nutrient_data.get("nutrient")
+                color_hex = nutrient_data.get("color_hex")
+                
+                if not nutrient_name or not color_hex:
+                    continue
+                
+                # Create nutrient object
+                nutrient_obj = {
+                    "nutrient": nutrient_name,
+                    "color_hex": color_hex
+                }
+                
+                # Avoid duplicates (check if this nutrient already exists for this meal item)
+                if nutrient_obj not in meal_item_nutrients[meal_item_id]:
+                    meal_item_nutrients[meal_item_id].append(nutrient_obj)
+        
+        return meal_item_nutrients
+        
+    except Exception as e:
+        print(f"Error fetching nutrients for meal items: {e}")
+        return {}
 
 
 @router.get(
@@ -113,4 +310,3 @@ async def get_meal_items(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch meal items: {str(e)}"
         )
-
