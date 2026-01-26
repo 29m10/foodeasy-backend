@@ -214,6 +214,7 @@ async def _fetch_nutrients_for_meal_items(meal_item_ids: List[int]) -> Dict[int,
     summary="Get active meal items with filters",
     description="""
     Get active meal items from the meal_items table with optional filters.
+    Each meal item includes its grocery items (with tags) and nutrients.
     
     **Filters available:**
     - can_vegetarian_eat: Filter by vegetarian compatibility (true/false)
@@ -229,6 +230,14 @@ async def _fetch_nutrients_for_meal_items(meal_item_ids: List[int]) -> Dict[int,
     **Note:** All filters are optional. If no filters are provided, all active meal items are returned.
     Only returns items where is_active = true.
     Response excludes created_at and is_active fields.
+    Each meal item includes:
+    - grocery_items: List of grocery items, where each item contains:
+      - id: Ingredient ID
+      - name: Ingredient name
+      - type: Ingredient type name
+      - type_id: Ingredient type ID
+      - tag: Tag string (main_item, fruit_item, vegetable_item, or spices_seeds_oils_item, or null if none)
+    - nutrients: List of nutrients with color_hex
     """
 )
 async def get_meal_items(
@@ -294,6 +303,23 @@ async def get_meal_items(
             {k: v for k, v in item.items() if k not in ["created_at", "is_active"]}
             for item in response.data
         ]
+        
+        # Extract meal item IDs to fetch grocery items and nutrients
+        meal_item_ids = [item.get("id") for item in filtered_data if item.get("id")]
+        
+        # Fetch grocery items and nutrients for all meal items
+        grocery_items_map = await _fetch_grocery_items_for_meal_items(meal_item_ids)
+        nutrients_map = await _fetch_nutrients_for_meal_items(meal_item_ids)
+        
+        # Add grocery items and nutrients to each meal item
+        for meal_item in filtered_data:
+            meal_item_id = meal_item.get("id")
+            
+            # Add grocery items (list of grocery items with details and tags)
+            meal_item["grocery_items"] = grocery_items_map.get(meal_item_id, [])
+            
+            # Add nutrients (list of nutrient objects with color_hex)
+            meal_item["nutrients"] = nutrients_map.get(meal_item_id, [])
         
         return {
             "success": True,
