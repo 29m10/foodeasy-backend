@@ -1,7 +1,8 @@
 # app/routes/meal_messaging.py
 
-from fastapi import APIRouter, HTTPException, status, Query, Path
+from fastapi import APIRouter, HTTPException, status, Query, Path, Depends
 from app.services.meal_messaging_service import meal_messaging_service
+from app.dependencies.auth import verify_user_access
 from typing import Dict, Any, Optional
 from datetime import date
 
@@ -53,7 +54,7 @@ router = APIRouter(prefix="/meal-messaging", tags=["Meal Messaging"])
     """
 )
 async def get_today_meal_messages(
-    user_id: str = Path(..., description="User ID"),
+    user_id: str = Depends(verify_user_access),
     cook_id: Optional[str] = Query(None, description="Specific cook ID to use. If not provided, uses the first cook."),
     date_str: Optional[str] = Query(None, description="Date in YYYY-MM-DD format. Defaults to today.", alias="date"),
     meal_type_id: Optional[int] = Query(None, description="Filter by specific meal type ID (e.g., 1 for breakfast). If not provided, returns all meal types.", gt=0)
