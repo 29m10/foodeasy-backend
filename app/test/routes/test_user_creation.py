@@ -113,18 +113,12 @@ async def create_test_user(
     supabase = get_supabase_admin()
     
     try:
-        # Generate a unique test Firebase UID for test users
-        test_firebase_uid = f"test_{str(uuid.uuid4())}"
-        
-        # Create a dummy phone number for test users (some databases require phone_number)
-        # Use a format that clearly indicates it's a test user
+        # Create a dummy phone number for test users
         test_phone_number = f"+91TEST{uuid.uuid4().hex[:8]}"
         
         # Create user profile in Supabase
-        # Let Supabase auto-generate the ID
         user_data = {
-            'firebase_uid': test_firebase_uid,
-            'phone_number': test_phone_number,  # Use test phone number instead of None
+            'phone_number': test_phone_number,
             'full_name': request.full_name
         }
         
@@ -172,7 +166,7 @@ async def create_test_user(
             "data": {
                 "user_id": str(created_user.get('id')),
                 "full_name": created_user.get('full_name'),
-                "firebase_uid": created_user.get('firebase_uid'),
+                "phone_number": created_user.get('phone_number'),
                 "metadata": metadata
             }
         }

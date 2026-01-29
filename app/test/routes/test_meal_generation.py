@@ -268,7 +268,6 @@ async def list_all_users(
             
             user_profile = {
                 'id': user.get('id'),
-                'firebase_uid': user.get('firebase_uid'),
                 'phone_number': user.get('phone_number'),
                 'full_name': user.get('full_name'),
                 'created_at': user.get('created_at'),
