@@ -71,6 +71,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# Project docs (internal)
+docs/
+
 # PyBuilder
 .pybuilder/
 target/
@@ -215,3 +218,5 @@ firebase-credentials.json
 *.json
 !package.json
 !package-lock.json
+
+
