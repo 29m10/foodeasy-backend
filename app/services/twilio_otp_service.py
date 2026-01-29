@@ -3,17 +3,22 @@
 """
 Send OTP via Twilio Messages API (SMS from your Twilio number) and verify codes
 stored in the backend. Uses: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER.
+Optional: SLACK_WEBHOOK_URL to post Twilio API call details (full, including tokens) to Slack.
 """
 
 import json
+import logging
 import os
 import secrets
 import time
-from typing import Dict, Any
+from typing import Any, Dict
 
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 def _env(key: str, default: str = "") -> str:
     v = os.getenv(key) or default
@@ -25,6 +30,8 @@ TWILIO_PHONE_NUMBER = _env("TWILIO_PHONE_NUMBER")  # From number, e.g. +18507887
 # Optional: Twilio Content Template SID (starts with HX, 34 chars). If set, SMS uses template.
 # Template must use {{OTP}} = OTP code, {{X}} = validity in minutes (e.g. "10" for 600s).
 TWILIO_OTP_CONTENT_SID = _env("TWILIO_OTP_CONTENT_SID")
+# Optional: Slack Incoming Webhook URL. If set, every Twilio API call is posted to Slack (full details, no redaction).
+SLACK_WEBHOOK_URL = _env("SLACK_WEBHOOK_URL")
 
 # OTP config
 OTP_LENGTH = 6
@@ -69,6 +76,48 @@ def _clean_expired():
         del _otp_store[p]
 
 
+def _send_twilio_call_to_slack(
+    url: str,
+    method: str,
+    account_sid: str,
+    auth_token: str,
+    body_params: Dict[str, str],
+) -> None:
+    """Post Twilio API call details to Slack (full, including tokens). No redaction."""
+    if not SLACK_WEBHOOK_URL or not SLACK_WEBHOOK_URL.strip():
+        return
+    try:
+        lines = [
+            "*Twilio API call*",
+            f"*URL:* `{url}`",
+            f"*Method:* {method}",
+            f"*Account SID:* `{account_sid}`",
+            f"*Auth Token:* `{auth_token}`",
+            "*Body (form):*",
+        ]
+        for k, v in body_params.items():
+            lines.append(f"  • `{k}` = `{v}`")
+        # Escape single quotes in values for display
+        safe = lambda s: str(s).replace("'", "'\\''")
+        full_curl = (
+            f"curl -X POST '{url}' "
+            f"-u '{account_sid}:{auth_token}' "
+            + " ".join(f"-d '{k}={safe(v)}'" for k, v in body_params.items())
+        )
+        lines.append(f"\n*Full cURL:*\n```{full_curl}```")
+        text = "\n".join(lines)
+        resp = requests.post(
+            SLACK_WEBHOOK_URL,
+            json={"text": text},
+            headers={"Content-Type": "application/json"},
+            timeout=5,
+        )
+        if not resp.ok:
+            logger.warning("Slack webhook failed: %s %s", resp.status_code, resp.text)
+    except Exception as e:
+        logger.warning("Slack notification failed: %s", e)
+
+
 def send_otp(phone_number: str) -> None:
     """
     Generate a 6-digit OTP, store it (with TTL), and send it via Twilio Messages API (SMS).
@@ -82,6 +131,7 @@ def send_otp(phone_number: str) -> None:
 
     client = get_twilio_client()
     from_number = _get_from_number()
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
 
     if TWILIO_OTP_CONTENT_SID:
         # Content SID must be HX + 32 chars (34 total). Template: {{OTP}} = code, {{X}} = validity minutes.
@@ -93,6 +143,19 @@ def send_otp(phone_number: str) -> None:
             )
         validity_minutes = str(OTP_TTL_SECONDS // 60)
         content_variables = json.dumps({"OTP": code, "X": validity_minutes})
+        body_params = {
+            "To": phone_number,
+            "From": from_number,
+            "ContentSid": _sid,
+            "ContentVariables": content_variables,
+        }
+        _send_twilio_call_to_slack(
+            url=url,
+            method="POST",
+            account_sid=TWILIO_ACCOUNT_SID or "",
+            auth_token=TWILIO_AUTH_TOKEN or "",
+            body_params=body_params,
+        )
         client.messages.create(
             to=phone_number,
             from_=from_number,
@@ -101,6 +164,18 @@ def send_otp(phone_number: str) -> None:
         )
     else:
         body = f"Your FoodEasy verification code is {code}. Valid for {OTP_TTL_SECONDS // 60} minutes."
+        body_params = {
+            "To": phone_number,
+            "From": from_number,
+            "Body": body,
+        }
+        _send_twilio_call_to_slack(
+            url=url,
+            method="POST",
+            account_sid=TWILIO_ACCOUNT_SID or "",
+            auth_token=TWILIO_AUTH_TOKEN or "",
+            body_params=body_params,
+        )
         client.messages.create(
             to=phone_number,
             from_=from_number,
