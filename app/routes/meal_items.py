@@ -227,6 +227,10 @@ async def _fetch_nutrients_for_meal_items(meal_item_ids: List[int]) -> Dict[int,
     - is_dinner: Filter by dinner meal type (true/false)
     - is_snacks: Filter by snacks meal type (true/false)
     
+    **Pagination:**
+    - limit: Max number of items to return (default 50, max 200).
+    - offset: Number of items to skip for pagination (default 0).
+    
     **Note:** All filters are optional. If no filters are provided, all active meal items are returned.
     Only returns items where is_active = true.
     Response excludes created_at and is_active fields.
@@ -249,7 +253,9 @@ async def get_meal_items(
     is_breakfast: Optional[bool] = Query(None, description="Filter by breakfast meal type"),
     is_lunch: Optional[bool] = Query(None, description="Filter by lunch meal type"),
     is_dinner: Optional[bool] = Query(None, description="Filter by dinner meal type"),
-    is_snacks: Optional[bool] = Query(None, description="Filter by snacks meal type")
+    is_snacks: Optional[bool] = Query(None, description="Filter by snacks meal type"),
+    limit: int = Query(50, ge=1, le=200, description="Max number of items to return"),
+    offset: int = Query(0, ge=0, description="Number of items to skip for pagination")
 ) -> Dict[str, Any]:
     """
     Get active meal items with optional filters.
@@ -295,8 +301,31 @@ async def get_meal_items(
         if is_snacks is not None:
             query = query.eq("is_snacks", is_snacks)
         
-        # Execute query
-        response = query.order("id").execute()
+        # Get total count with same filters (for pagination metadata)
+        count_query = supabase.table("meal_items").select("id", count="exact").eq("is_active", True)
+        if can_vegetarian_eat is not None:
+            count_query = count_query.eq("can_vegetarian_eat", can_vegetarian_eat)
+        if can_eggetarian_eat is not None:
+            count_query = count_query.eq("can_eggetarian_eat", can_eggetarian_eat)
+        if can_carnitarian_eat is not None:
+            count_query = count_query.eq("can_carnitarian_eat", can_carnitarian_eat)
+        if can_omnitarian_eat is not None:
+            count_query = count_query.eq("can_omnitarian_eat", can_omnitarian_eat)
+        if can_vegan_eat is not None:
+            count_query = count_query.eq("can_vegan_eat", can_vegan_eat)
+        if is_breakfast is not None:
+            count_query = count_query.eq("is_breakfast", is_breakfast)
+        if is_lunch is not None:
+            count_query = count_query.eq("is_lunch", is_lunch)
+        if is_dinner is not None:
+            count_query = count_query.eq("is_dinner", is_dinner)
+        if is_snacks is not None:
+            count_query = count_query.eq("is_snacks", is_snacks)
+        count_response = count_query.limit(1).execute()
+        total_count = getattr(count_response, "count", None) or 0
+        
+        # Execute data query with pagination
+        response = query.order("id").range(offset, offset + limit - 1).execute()
         
         # Remove created_at and is_active from each item
         filtered_data = [
@@ -324,7 +353,10 @@ async def get_meal_items(
         return {
             "success": True,
             "data": filtered_data,
-            "count": len(filtered_data)
+            "count": len(filtered_data),
+            "total": total_count,
+            "limit": limit,
+            "offset": offset
         }
         
     except HTTPException:
