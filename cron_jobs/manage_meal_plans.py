@@ -18,6 +18,7 @@ Environment Variables Required:
     - PERISKOPE_PHONE_NUMBER: Phone number for Periskope API
     - PERISKOPE_API_TOKEN: Bearer token for Periskope API
     - PERISKOPE_API_BASE_URL: Base URL for Periskope API (defaults to https://api.periskope.app)
+    - SLACK_WEBHOOK_URL: (Optional) Slack Incoming Webhook URL for cron job alerts
 """
 
 import sys
@@ -360,6 +361,35 @@ async def send_whatsapp_message(chat_id: str, message: str) -> bool:
         return False
 
 
+async def send_slack_alert(message: str) -> bool:
+    """
+    Send a single message to Slack via Incoming Webhook.
+
+    Args:
+        message: Plain text message to send (single block).
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    webhook_url = os.getenv("SLACK_WEBHOOK_URL")
+    if not webhook_url:
+        print("SLACK_WEBHOOK_URL not set, skipping Slack alert")
+        return False
+    try:
+        payload = {"text": message}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(webhook_url, json=payload)
+            if response.status_code == 200:
+                print("Slack alert sent successfully")
+                return True
+            else:
+                print(f"Failed to send Slack alert. Status: {response.status_code}, Response: {response.text}")
+                return False
+    except Exception as e:
+        print(f"Error sending Slack alert: {str(e)}")
+        return False
+
+
 async def manage_meal_plans() -> Dict[str, Any]:
     """
     Main function to manage meal plans:
@@ -381,6 +411,14 @@ async def manage_meal_plans() -> Dict[str, Any]:
         
         if not meal_plans:
             print("No active meal plans found")
+            success_msg = (
+                "Meal Plans Cron – Completed\n"
+                f"Run: {datetime.now().isoformat()}\n"
+                "Active plans processed: 0\n"
+                "Inactivated: 0\n"
+                "New plans generated: 0\n"
+            )
+            await send_slack_alert(success_msg)
             return {
                 "success": True,
                 "total_meal_plans": 0,
@@ -392,6 +430,7 @@ async def manage_meal_plans() -> Dict[str, Any]:
         inactivated_count = 0
         new_plans_generated = 0
         inactivated_plans = []
+        new_plans_created = []
         plans_to_generate = []
         
         # Process each meal plan
@@ -445,6 +484,11 @@ async def manage_meal_plans() -> Dict[str, Any]:
             
             if result:
                 new_plans_generated += 1
+                new_plans_created.append({
+                    "user_id": user_id,
+                    "start_date": result["start_date"],
+                    "end_date": result["end_date"],
+                })
                 print(f"Successfully generated meal plan {result.get('user_meal_plan_id')} for user {user_id}")
                 
                 # Send WhatsApp message to user
@@ -463,6 +507,7 @@ async def manage_meal_plans() -> Dict[str, Any]:
             "inactivated": inactivated_count,
             "new_plans_generated": new_plans_generated,
             "inactivated_plans": inactivated_plans,
+            "new_plans_created": new_plans_created,
             "timestamp": datetime.now().isoformat()
         }
         
@@ -472,6 +517,22 @@ async def manage_meal_plans() -> Dict[str, Any]:
         print(f"  New meal plans generated: {summary['new_plans_generated']}")
         print(f"[{datetime.now().isoformat()}] Cron job completed successfully")
         
+        # Slack alert: single message with basic details
+        success_lines = [
+            "Meal Plans Cron – Completed",
+            f"Run: {summary['timestamp']}",
+            f"Active plans processed: {summary['total_meal_plans']}",
+            f"Inactivated: {summary['inactivated']}",
+            f"New plans generated: {summary['new_plans_generated']}",
+        ]
+        if new_plans_created:
+            success_lines.append("")
+            success_lines.append("New plans:")
+            for p in new_plans_created:
+                success_lines.append(f"• user_id: {p['user_id']} | start_date: {p['start_date']} | end_date: {p['end_date']}")
+        success_msg = "\n".join(success_lines)
+        await send_slack_alert(success_msg)
+        
         return summary
         
     except Exception as e:
@@ -479,6 +540,12 @@ async def manage_meal_plans() -> Dict[str, Any]:
         print(f"[{datetime.now().isoformat()}] {error_msg}")
         import traceback
         traceback.print_exc()
+        failure_msg = (
+            "Meal Plans Cron – Failed\n"
+            f"Run: {datetime.now().isoformat()}\n"
+            f"Error: {error_msg}\n"
+        )
+        await send_slack_alert(failure_msg)
         return {
             "success": False,
             "error": error_msg,
