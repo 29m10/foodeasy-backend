@@ -376,7 +376,7 @@ async def send_slack_alert(message: str) -> bool:
         print("SLACK_WEBHOOK_URL not set, skipping Slack alert")
         return False
     try:
-        payload = {"text": message}
+        payload = {"text": f"```\n{message}\n```"}
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(webhook_url, json=payload)
             if response.status_code == 200:
