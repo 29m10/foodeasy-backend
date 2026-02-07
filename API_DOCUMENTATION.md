@@ -531,7 +531,7 @@ Get active meal items with optional filters. Each item includes grocery items (w
         }
       ],
       "nutrients": [
-        { "nutrient": "Protein", "color_hex": "#FF5733" }
+        { "nutrient": "Protein", "pill_bg_color": "#FF5733", "pill_text_color": "#FFFFFF" }
       ]
     }
   ],

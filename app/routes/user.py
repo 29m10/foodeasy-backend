@@ -738,22 +738,22 @@ async def _fetch_grocery_items_for_meal_items(meal_item_ids: List[int]) -> Dict[
         return {}
 
 
-async def _fetch_nutrients_for_meal_items(meal_item_ids: List[int]) -> Dict[int, List[Dict[str, str]]]:
+async def _fetch_nutrients_for_meal_items(meal_item_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
     """
-    Fetch nutrients with hex colors for multiple meal items.
+    Fetch nutrients with pill colors for multiple meal items.
     
     Args:
         meal_item_ids: List of meal item IDs to fetch nutrients for
         
     Returns:
-        Dict mapping meal_item_id to list of nutrients with their hex colors
+        Dict mapping meal_item_id to list of nutrients with pill_bg_color and pill_text_color
         Example: {
             1: [
-                {"nutrient": "Protein", "color_hex": "#FF5733"},
-                {"nutrient": "Carbohydrates", "color_hex": "#33FF57"}
+                {"nutrient": "Protein", "pill_bg_color": "#FF5733", "pill_text_color": "#FFFFFF"},
+                {"nutrient": "Carbohydrates", "pill_bg_color": "#33FF57", "pill_text_color": "#000000"}
             ],
             2: [
-                {"nutrient": "Fiber", "color_hex": "#3357FF"}
+                {"nutrient": "Fiber", "pill_bg_color": "#3357FF", "pill_text_color": "#FFFFFF"}
             ]
         }
     """
@@ -769,7 +769,8 @@ async def _fetch_nutrients_for_meal_items(meal_item_ids: List[int]) -> Dict[int,
                 meal_item_id,
                 master_nutrients (
                     nutrient,
-                    color_hex
+                    pill_bg_color,
+                    pill_text_color
                 )
             """) \
             .in_("meal_item_id", meal_item_ids) \
@@ -791,17 +792,18 @@ async def _fetch_nutrients_for_meal_items(meal_item_ids: List[int]) -> Dict[int,
                 if meal_item_id not in meal_item_nutrients:
                     meal_item_nutrients[meal_item_id] = []
                 
-                # Get nutrient name and color_hex
+                # Get nutrient name and pill colors (pill_text_color is NOT NULL in schema)
                 nutrient_name = nutrient_data.get("nutrient")
-                color_hex = nutrient_data.get("color_hex")
+                pill_text_color = nutrient_data.get("pill_text_color")
                 
-                if not nutrient_name or not color_hex:
+                if not nutrient_name or not pill_text_color:
                     continue
                 
-                # Create nutrient object
+                # Create nutrient object (pill_bg_color can be null)
                 nutrient_obj = {
                     "nutrient": nutrient_name,
-                    "color_hex": color_hex
+                    "pill_bg_color": nutrient_data.get("pill_bg_color"),
+                    "pill_text_color": pill_text_color
                 }
                 
                 # Avoid duplicates (check if this nutrient already exists for this meal item)
@@ -1002,7 +1004,7 @@ async def list_user_meal_plans(
     - Meal type level: Grouped by meal type within each date
     - Meal items: List of meal items for each meal type
     - Grocery items: Each meal item includes grocery items grouped by their type
-    - Nutrients: Each meal item includes nutrients with their color hex codes
+    - Nutrients: Each meal item includes nutrients with pill_bg_color and pill_text_color
     
     **Authentication Required:** Bearer token in Authorization header.
     
@@ -1038,11 +1040,13 @@ async def list_user_meal_plans(
                   "nutrients": [
                     {
                       "nutrient": "Protein",
-                      "color_hex": "#FF5733"
+                      "pill_bg_color": "#FF5733",
+                      "pill_text_color": "#FFFFFF"
                     },
                     {
                       "nutrient": "Carbohydrates",
-                      "color_hex": "#33FF57"
+                      "pill_bg_color": "#33FF57",
+                      "pill_text_color": "#000000"
                     }
                   ],
                   ...
@@ -1058,7 +1062,7 @@ async def list_user_meal_plans(
     **Note:** 
     - Each meal item includes `user_meal_plan_detail_id` which is the ID from the `user_meal_plan_details` table. This ID can be used for operations like swapping or removing meal items.
     - Each meal item includes `grocery_items_by_type` which contains the ingredient names grouped by their type.
-    - Each meal item includes `nutrients` which is an array of nutrient objects with their name and color hex code.
+    - Each meal item includes `nutrients` which is an array of nutrient objects with their name, pill_bg_color, and pill_text_color.
     
     **Response Structure (Multiple Meal Plans):**
     ```json
@@ -1082,7 +1086,8 @@ async def list_user_meal_plans(
                   "nutrients": [
                     {
                       "nutrient": "Protein",
-                      "color_hex": "#FF5733"
+                      "pill_bg_color": "#FF5733",
+                      "pill_text_color": "#FFFFFF"
                     }
                   ],
                   ...
@@ -1103,7 +1108,7 @@ async def list_user_meal_plans(
     - When multiple meal plans are returned, all dates from all meal plans are combined into a single `dates` array, sorted by date. 
     - Each meal item includes `user_meal_plan_detail_id` which is the ID from the `user_meal_plan_details` table.
     - Each meal item includes `grocery_items_by_type` which contains the ingredient names grouped by their type.
-    - Each meal item includes `nutrients` which is an array of nutrient objects with their name and color hex code.
+    - Each meal item includes `nutrients` which is an array of nutrient objects with their name, pill_bg_color, and pill_text_color.
     
     Only returns active meal plan details (where is_active = true).
     If no user_meal_plan_id is provided, returns all active meal plans (up to limit).

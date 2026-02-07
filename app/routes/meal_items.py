@@ -131,22 +131,22 @@ async def _fetch_grocery_items_for_meal_items(meal_item_ids: List[int]) -> Dict[
         return {}
 
 
-async def _fetch_nutrients_for_meal_items(meal_item_ids: List[int]) -> Dict[int, List[Dict[str, str]]]:
+async def _fetch_nutrients_for_meal_items(meal_item_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
     """
-    Fetch nutrients with hex colors for multiple meal items.
+    Fetch nutrients with pill colors for multiple meal items.
     
     Args:
         meal_item_ids: List of meal item IDs to fetch nutrients for
         
     Returns:
-        Dict mapping meal_item_id to list of nutrients with their hex colors
+        Dict mapping meal_item_id to list of nutrients with pill_bg_color and pill_text_color
         Example: {
             1: [
-                {"nutrient": "Protein", "color_hex": "#FF5733"},
-                {"nutrient": "Carbohydrates", "color_hex": "#33FF57"}
+                {"nutrient": "Protein", "pill_bg_color": "#FF5733", "pill_text_color": "#FFFFFF"},
+                {"nutrient": "Carbohydrates", "pill_bg_color": "#33FF57", "pill_text_color": "#000000"}
             ],
             2: [
-                {"nutrient": "Fiber", "color_hex": "#3357FF"}
+                {"nutrient": "Fiber", "pill_bg_color": "#3357FF", "pill_text_color": "#FFFFFF"}
             ]
         }
     """
@@ -162,7 +162,8 @@ async def _fetch_nutrients_for_meal_items(meal_item_ids: List[int]) -> Dict[int,
                 meal_item_id,
                 master_nutrients (
                     nutrient,
-                    color_hex
+                    pill_bg_color,
+                    pill_text_color
                 )
             """) \
             .in_("meal_item_id", meal_item_ids) \
@@ -184,17 +185,18 @@ async def _fetch_nutrients_for_meal_items(meal_item_ids: List[int]) -> Dict[int,
                 if meal_item_id not in meal_item_nutrients:
                     meal_item_nutrients[meal_item_id] = []
                 
-                # Get nutrient name and color_hex
+                # Get nutrient name and pill colors (pill_text_color is NOT NULL in schema)
                 nutrient_name = nutrient_data.get("nutrient")
-                color_hex = nutrient_data.get("color_hex")
+                pill_text_color = nutrient_data.get("pill_text_color")
                 
-                if not nutrient_name or not color_hex:
+                if not nutrient_name or not pill_text_color:
                     continue
                 
-                # Create nutrient object
+                # Create nutrient object (pill_bg_color can be null)
                 nutrient_obj = {
                     "nutrient": nutrient_name,
-                    "color_hex": color_hex
+                    "pill_bg_color": nutrient_data.get("pill_bg_color"),
+                    "pill_text_color": pill_text_color
                 }
                 
                 # Avoid duplicates (check if this nutrient already exists for this meal item)
@@ -241,7 +243,7 @@ async def _fetch_nutrients_for_meal_items(meal_item_ids: List[int]) -> Dict[int,
       - type: Ingredient type name
       - type_id: Ingredient type ID
       - tag: Tag string (main_item, fruit_item, vegetable_item, or spices_seeds_oils_item, or null if none)
-    - nutrients: List of nutrients with color_hex
+    - nutrients: List of nutrients with pill_bg_color and pill_text_color
     """
 )
 async def get_meal_items(
@@ -347,7 +349,7 @@ async def get_meal_items(
             # Add grocery items (list of grocery items with details and tags)
             meal_item["grocery_items"] = grocery_items_map.get(meal_item_id, [])
             
-            # Add nutrients (list of nutrient objects with color_hex)
+            # Add nutrients (list of nutrient objects with pill_bg_color and pill_text_color)
             meal_item["nutrients"] = nutrients_map.get(meal_item_id, [])
         
         return {
