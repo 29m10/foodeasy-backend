@@ -165,6 +165,9 @@ async def get_user_groceries(
                     
                     if ingredient_id not in grocery_item_map:
                         ingredient_type_data = ingredient_data.get("meal_ingredients_types")
+                        # Supabase may return FK relation as object or single-element list
+                        if isinstance(ingredient_type_data, list) and len(ingredient_type_data) > 0:
+                            ingredient_type_data = ingredient_type_data[0]
                         type_display_order = ingredient_type_data.get("display_order") if ingredient_type_data else None
 
                         # Format quantity with unit
@@ -203,14 +206,32 @@ async def get_user_groceries(
                 detail=f"Failed to fetch grocery items: {str(e)}"
             )
         
-        # Group groceries by type (only ingredient names) and track display_order per type
+        # Group groceries by type (only ingredient names)
         grocery_items_by_type = defaultdict(list)
-        type_display_order_map = {}
         for grocery in grocery_items:
             type_name = grocery.get("type") or "Uncategorized"
             ingredient_name = grocery.get("name")
             if ingredient_name and ingredient_name not in grocery_items_by_type[type_name]:
                 grocery_items_by_type[type_name].append(ingredient_name)
+
+        # Resolve display_order from meal_ingredients_types so order matches admin table (avoids join returning null)
+        type_names_in_response = list(grocery_items_by_type.keys())
+        type_display_order_map = {}
+        if type_names_in_response:
+            try:
+                types_response = supabase.table("meal_ingredients_types") \
+                    .select("name, display_order") \
+                    .eq("is_active", True) \
+                    .execute()
+                for row in (types_response.data or []):
+                    name = row.get("name")
+                    if name and name in type_names_in_response:
+                        type_display_order_map[name] = row.get("display_order")
+            except Exception as e:
+                print(f"Error fetching meal_ingredients_types for display_order: {e}")
+        # Fallback: use display_order from grocery items for any type not in the map
+        for grocery in grocery_items:
+            type_name = grocery.get("type") or "Uncategorized"
             if type_name not in type_display_order_map:
                 type_display_order_map[type_name] = grocery.get("type_display_order")
 
