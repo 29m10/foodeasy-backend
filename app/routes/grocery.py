@@ -142,7 +142,8 @@ async def get_user_groceries(
                         meal_ingredient_type_id,
                         meal_ingredients_types (
                             id,
-                            name
+                            name,
+                            display_order
                         )
                     )
                 """) \
@@ -164,7 +165,8 @@ async def get_user_groceries(
                     
                     if ingredient_id not in grocery_item_map:
                         ingredient_type_data = ingredient_data.get("meal_ingredients_types")
-                        
+                        type_display_order = ingredient_type_data.get("display_order") if ingredient_type_data else None
+
                         # Format quantity with unit
                         quantity = item.get("quantity")
                         unit = item.get("unit")
@@ -174,11 +176,13 @@ async def get_user_groceries(
                             if unit:
                                 quantity_str += f" {unit}"
                         
+                        type_name = ingredient_type_data.get("name") if ingredient_type_data else "Uncategorized"
                         grocery_item_map[ingredient_id] = {
                             "id": ingredient_id,
                             "name": ingredient_data.get("name"),
-                            "type": ingredient_type_data.get("name") if ingredient_type_data else "Uncategorized",
+                            "type": type_name,
                             "type_id": ingredient_data.get("meal_ingredient_type_id"),
+                            "type_display_order": type_display_order,
                             "quantity": quantity_str or None,
                             "description": ingredient_data.get("description"),
                             "meal_items": []
@@ -199,16 +203,24 @@ async def get_user_groceries(
                 detail=f"Failed to fetch grocery items: {str(e)}"
             )
         
-        # Group groceries by type (only ingredient names)
+        # Group groceries by type (only ingredient names) and track display_order per type
         grocery_items_by_type = defaultdict(list)
+        type_display_order_map = {}
         for grocery in grocery_items:
             type_name = grocery.get("type") or "Uncategorized"
             ingredient_name = grocery.get("name")
             if ingredient_name and ingredient_name not in grocery_items_by_type[type_name]:
                 grocery_items_by_type[type_name].append(ingredient_name)
-        
-        # Convert defaultdict to regular dict for JSON serialization
-        grocery_items_by_type = dict(grocery_items_by_type)
+            if type_name not in type_display_order_map:
+                type_display_order_map[type_name] = grocery.get("type_display_order")
+
+        # Sort type names by display_order (nulls last), then convert to dict to preserve order
+        def sort_key(type_name: str):
+            order = type_display_order_map.get(type_name)
+            return (order is None, order if order is not None else 0)
+
+        sorted_type_names = sorted(grocery_items_by_type.keys(), key=sort_key)
+        grocery_items_by_type = {k: grocery_items_by_type[k] for k in sorted_type_names}
         
         return {
             "success": True,
